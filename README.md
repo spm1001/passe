@@ -1,0 +1,81 @@
+# passe
+
+Fast browser automation for Claude Code. One WebSocket, one process, no daemon.
+
+```
+Navigate + screenshot: 213ms (passe) vs ~12,600ms (MCP-based tools)
+```
+
+The speed gap isn't the browser — it's the protocol. MCP needs a model round-trip per action (~6s each). Passe does everything in a single Bash call via raw [Chrome DevTools Protocol](https://chromedevtools.github.io/devtools-protocol/).
+
+## Install
+
+```bash
+uv tool install passe
+```
+
+Requires Chrome with `--remote-debugging-port=9222`. Passe auto-starts a debug Chrome instance if none is running.
+
+## Quick start
+
+```bash
+# Screenshot a page
+passe run -c 'goto https://example.com; screenshot /tmp/page.png'
+
+# Extract article content as markdown
+passe run -c 'goto https://example.com; read /tmp/article.md'
+
+# Multi-step scripts use heredoc
+passe run - <<'EOF'
+goto https://example.com
+click-text "Accept Cookies"
+wait 500
+type "#search" "query"
+press Enter
+wait-for .results
+screenshot /tmp/results.png
+EOF
+```
+
+Output is structured JSON — NDJSON per step on stderr, summary on stdout:
+
+```json
+{"ok": true, "steps": 2, "total_ms": 213.4, "files": ["/tmp/page.png"], "final_url": "https://example.com/"}
+```
+
+## Verbs
+
+| | |
+|---|---|
+| **Navigate** | `goto` `back` `forward` `scroll` |
+| **Interact** | `click` `click-text` `click-if` `type` `fill` `select` `press` `hover` |
+| **Observe** | `screenshot` `snapshot` `read` `eval` `eval-to` |
+| **Control** | `wait` `wait-for` `wait-navigation` `viewport` `assert` `log` |
+
+`snapshot` lists interactive elements with CSS selectors — use it to scout unknown pages before writing interaction scripts.
+
+`read` extracts page content as markdown via Readability.js + Turndown.js running in Chrome's V8. Warns when extraction looks incomplete.
+
+## When to use passe (and when not to)
+
+| Need | Tool |
+|------|------|
+| Screenshot, interact, test a page | **passe** |
+| Extract content preserving tables/code blocks | **passe** `read` |
+| Extract article/blog content (cleaner) | [mise](https://github.com/spm1001/mise-en-space) `fetch` |
+| Full Playwright test suites | Playwright directly |
+
+## The Kitchen
+
+Passe is part of a tool suite built around Claude Code, following a professional kitchen [brigade](https://en.wikipedia.org/wiki/Brigade_de_cuisine) metaphor:
+
+| Tool | Brigade role | What it does |
+|------|-------------|--------------|
+| [**mise-en-space**](https://github.com/spm1001/mise-en-space) | Mise en place | Content from Google Workspace and the web, prepped and ready |
+| [**passe**](https://github.com/spm1001/passe) | The pass | Fast browser automation — the inspection window between kitchen and floor |
+| [**garde-manger**](https://github.com/spm1001/garde-manger) | Cold station | Persistent, searchable memory across Claude sessions |
+| [**trousse**](https://github.com/spm1001/trousse) | Knife roll | Skills and behavioural extensions for Claude Code |
+
+## License
+
+MIT
