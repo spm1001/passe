@@ -513,9 +513,10 @@ async def test_proportional_check_passes_when_enough_rows():
 
 @pytest.mark.asyncio
 async def test_quality_gate_no_dom_eval_when_output_rich():
-    """Output has 20+ table rows AND code → DOM eval skipped (only 2 send calls)."""
+    """Output has 20+ table rows AND 5+ code blocks → DOM eval skipped (only 2 send calls)."""
     rows = '\n'.join(f'| {i} | data |' for i in range(25))
-    content = rows + '\n\n```\ncode\n```'
+    code = '\n\n'.join(f'```\ncode block {i}\n```' for i in range(6))
+    content = rows + '\n\n' + code
     client = _make_client(
         '<html></html>',
         json.dumps({'textLength': 500, 'url': 'http://example.com'}),
@@ -527,3 +528,92 @@ async def test_quality_gate_no_dom_eval_when_output_rich():
     assert result['source'] == 'trafilatura'
     # Only 2 calls: outerHTML + meta. No DOM signal eval.
     assert client.send.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_proportional_code_loss(capsys):
+    """Page has 120 <pre> blocks but output has only 3 → gate fires (Effective Go scenario)."""
+    code = '\n\n'.join(f'```\nblock {i}\n```' for i in range(3))
+    content = 'A' * 200 + '\n' + code
+    readability_data = json.dumps({
+        'title': 'Test', 'markdown': '# Fallback\n```\ncode\n```',
+        'pageTextLength': 500,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 0, 'codeBlocks': 120}),
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    stderr = capsys.readouterr().err
+    assert 'quality gate' in stderr
+    assert '120 code blocks' in stderr
+    assert 'got 3' in stderr
+
+
+@pytest.mark.asyncio
+async def test_proportional_code_check_passes_when_enough():
+    """Page has 10 <pre> blocks, output has 8 (80%) → pass."""
+    code = '\n\n'.join(f'```\nblock {i}\n```' for i in range(8))
+    content = 'A' * 200 + '\n' + code
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 0, 'codeBlocks': 10}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_gate_reject_readability_fail_keeps_trafilatura(capsys):
+    """Gate rejects trafilatura, Readability also fails → keep trafilatura (not innerText)."""
+    content = 'A' * 200 + '\n```\nonly block\n```'
+    readability_fallback = json.dumps({
+        'title': 'Test', 'markdown': 'raw innerText here',
+        'fallback': True, 'pageTextLength': 500,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 30, 'codeBlocks': 0}),
+        readability_fallback,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+    assert result['markdown'] == content
+    stderr = capsys.readouterr().err
+    assert 'quality gate' in stderr
+    assert 'Readability also failed' in stderr
+
+
+@pytest.mark.asyncio
+async def test_no_gate_reject_readability_fail_uses_innertext(capsys):
+    """No gate rejection + Readability fails → innerText (no trafilatura to restore)."""
+    readability_fallback = json.dumps({
+        'title': 'Test', 'markdown': 'raw innerText here',
+        'fallback': True, 'pageTextLength': 500,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+        readability_fallback,
+    )
+    mock_traf = _traf_module(return_value=None)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'innerText'
+    stderr = capsys.readouterr().err
+    assert 'fell back to innerText' in stderr

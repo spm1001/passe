@@ -508,21 +508,24 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
     except Exception as exc:
         print(f'[read] trafilatura failed: {exc} — falling back to Readability', file=sys.stderr)
 
+    gate_rejected_markdown = None  # stash if gate rejects — better than innerText
+
     # Stage 1.5: Structural quality gate — detect table/code-block loss.
     # Trafilatura can pass the 10% text ratio check but strip critical structure.
     # Thresholds (empirical, tested against ISO-3166-1, Python docs, Wikipedia):
     #   - Binary:        page >= 5 data rows, output has 0 table markers → reject
     #   - Proportional:  page >= 10 data rows, output < 25% of page rows → reject
-    #   - Code blocks:   page >= 2 long <pre> blocks, output has 0 fences → reject
-    #   - Skip DOM eval: output has 20+ table rows AND code fences (clearly preserved)
+    #   - Code binary:   page >= 2 long <pre> blocks, output has 0 fences → reject
+    #   - Code proportional: page >= 5 long <pre> blocks, output < 25% → reject
+    #   - Skip DOM eval: output has 20+ table rows AND 5+ code fences (clearly preserved)
     if source == 'trafilatura':
         import re
         # Count pipe-table data rows (exclude separator rows like |---|---|)
         output_table_rows = len(re.findall(r'^\|.*\w.*\|', markdown, re.MULTILINE))
-        has_code = bool(re.search(r'^```', markdown, re.MULTILINE))
+        output_code_blocks = len(re.findall(r'^```', markdown, re.MULTILINE)) // 2
 
         # Only query DOM when output might be missing structure
-        if output_table_rows < 20 or not has_code:
+        if output_table_rows < 20 or output_code_blocks < 5:
             dom_raw = await do_eval(client, (
                 'JSON.stringify({dataRows:[...document.querySelectorAll("tr")]'
                 '.filter(r=>r.querySelectorAll("td").length>=2).length,'
@@ -538,14 +541,20 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
             # Proportional check: big table mostly stripped
             elif page_rows >= 10 and output_table_rows < page_rows * 0.25:
                 lost.append(f'{page_rows} table rows (got {output_table_rows})')
-            if not has_code and dom.get('codeBlocks', 0) >= 2:
-                lost.append(f'{dom["codeBlocks"]} code blocks')
+            page_code = dom.get('codeBlocks', 0)
+            # Binary check: page has code blocks, output has none
+            if output_code_blocks == 0 and page_code >= 2:
+                lost.append(f'{page_code} code blocks')
+            # Proportional check: many code blocks mostly stripped
+            elif page_code >= 5 and output_code_blocks < page_code * 0.25:
+                lost.append(f'{page_code} code blocks (got {output_code_blocks})')
 
             if lost:
                 print(
                     f'[read] quality gate: trafilatura dropped {", ".join(lost)}'
                     ' — falling to Readability', file=sys.stderr
                 )
+                gate_rejected_markdown = markdown
                 markdown = None
                 source = None
 
@@ -561,10 +570,15 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
         md = data.get('markdown', '')
 
         if data.get('fallback'):
-            # Stage 3: Readability failed — EXTRACT_JS already fell back to innerText
-            markdown = md
-            source = 'innerText'
-            warning = 'trafilatura and Readability both failed — fell back to innerText'
+            # Stage 3: Readability failed — prefer gate-rejected trafilatura over innerText
+            if gate_rejected_markdown:
+                markdown = gate_rejected_markdown
+                source = 'trafilatura'
+                warning = 'Readability also failed — kept trafilatura output (missing some structure)'
+            else:
+                markdown = md
+                source = 'innerText'
+                warning = 'trafilatura and Readability both failed — fell back to innerText'
         elif md:
             markdown = md
             source = 'readability'
