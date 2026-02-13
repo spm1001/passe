@@ -617,3 +617,69 @@ async def test_no_gate_reject_readability_fail_uses_innertext(capsys):
     assert result['source'] == 'innerText'
     stderr = capsys.readouterr().err
     assert 'fell back to innerText' in stderr
+
+
+# ── force_source (--source flag) ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_force_source_trafilatura():
+    """--source trafilatura skips cascade, uses trafilatura only."""
+    client = _make_client(
+        '<html><body>hello</body></html>',
+        json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+    )
+    mock_traf = _traf_module(return_value='# Forced trafilatura')
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client, force_source='trafilatura')
+
+    assert result['source'] == 'trafilatura'
+    assert result['markdown'] == '# Forced trafilatura'
+    # Only 2 send calls (outerHTML + meta), no Readability or DOM eval
+    assert client.send.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_force_source_readability():
+    """--source readability skips trafilatura, uses Readability directly."""
+    readability_data = json.dumps({
+        'title': 'Test', 'markdown': '# From Readability',
+        'pageTextLength': 100,
+    })
+    client = _make_client(
+        '<html><body>hello</body></html>',
+        json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+        readability_data,
+    )
+    result = await do_read(client, force_source='readability')
+
+    assert result['source'] == 'readability'
+    assert result['markdown'] == '# From Readability'
+
+
+@pytest.mark.asyncio
+async def test_force_source_innertext():
+    """--source innertext skips everything, returns raw innerText."""
+    client = _make_client(
+        '<html><body>hello</body></html>',
+        json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+        'Raw text content here',
+    )
+    result = await do_read(client, force_source='innertext')
+
+    assert result['source'] == 'innerText'
+    assert result['markdown'] == 'Raw text content here'
+
+
+@pytest.mark.asyncio
+async def test_force_source_unknown(capsys):
+    """--source bogus warns about unknown source."""
+    client = _make_client(
+        '<html><body>hello</body></html>',
+        json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+    )
+    result = await do_read(client, force_source='bogus')
+
+    assert result['markdown'] == ''
+    stderr = capsys.readouterr().err
+    assert 'Unknown source' in stderr

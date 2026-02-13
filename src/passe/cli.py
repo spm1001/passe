@@ -472,10 +472,11 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
-async def do_read(client: CDPClient, path: str = None) -> dict:
+async def do_read(client: CDPClient, path: str = None, force_source: str = None) -> dict:
     """Extract page content as markdown.
 
     Cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText.
+    force_source: 'trafilatura', 'readability', or 'innertext' — skip cascade, use only this.
     Returns dict with 'markdown', optional 'warning', and 'source'.
     """
     # Get page HTML (with shadow DOM flattened) and metadata from Chrome.
@@ -492,6 +493,50 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
     markdown = None
     source = None
     warning = None
+
+    # Forced source — skip cascade, use only the specified extractor
+    if force_source:
+        fs = force_source.lower()
+        if fs == 'trafilatura':
+            try:
+                import trafilatura
+                markdown = trafilatura.extract(
+                    html, url=page_url,
+                    include_formatting=True, include_links=True, include_tables=True,
+                ) or ''
+                source = 'trafilatura'
+            except Exception as exc:
+                markdown = ''
+                source = 'trafilatura'
+                warning = f'trafilatura failed: {exc}'
+        elif fs == 'readability':
+            from ._libs import READABILITY_JS, TURNDOWN_JS, EXTRACT_JS
+            combined = READABILITY_JS + ';\n' + TURNDOWN_JS + ';\n' + EXTRACT_JS
+            result = await client.send('Runtime.evaluate', {
+                'expression': combined, 'awaitPromise': False
+            })
+            raw = result['result']['result'].get('value', '{}')
+            data = json.loads(raw)
+            markdown = data.get('markdown', '')
+            source = 'readability' if not data.get('fallback') else 'innerText'
+            if data.get('fallback'):
+                warning = 'Readability returned no article — output is innerText'
+        elif fs == 'innertext':
+            text = await do_eval(client, 'document.body.innerText')
+            markdown = text or ''
+            source = 'innerText'
+        else:
+            markdown = ''
+            source = 'unknown'
+            warning = f'Unknown source: {force_source}. Use trafilatura, readability, or innertext.'
+
+        if warning:
+            print(f'[read] warning: {warning}', file=sys.stderr)
+        print(f'[read] source: {source}', file=sys.stderr)
+        if path:
+            with open(path, 'w') as f:
+                f.write(markdown)
+        return {'markdown': markdown, 'warning': warning, 'source': source}
 
     # Stage 1: trafilatura — Python-side extraction from rendered HTML
     try:
@@ -810,8 +855,17 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 else:
                     step_info['result'] = text[:200]
             elif verb == 'read':
-                path = args[0] if args else None
-                read_result = await do_read(client, path)
+                read_args = list(args)
+                force_source = None
+                if '--source' in read_args:
+                    idx = read_args.index('--source')
+                    if idx + 1 < len(read_args):
+                        force_source = read_args[idx + 1]
+                        del read_args[idx:idx + 2]
+                    else:
+                        del read_args[idx]
+                path = read_args[0] if read_args else None
+                read_result = await do_read(client, path, force_source=force_source)
                 if path:
                     files.append(path)
                 else:
