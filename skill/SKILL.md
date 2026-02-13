@@ -6,7 +6,8 @@ description: >
   that prevent malformed scripts and wasted round-trips. Triggers on 'passe run',
   'automate the browser', 'screenshot a page', 'interact with a website',
   'click a button on', 'fill a form on', 'scrape this page', 'test this page'.
-  Not for content fetching (use mise fetch). (user)
+  For clean article/blog extraction use mise fetch; for DOM-faithful extraction
+  (tables, code blocks, technical docs) use passe read. (user)
 ---
 
 # passe — fast CDP browser automation

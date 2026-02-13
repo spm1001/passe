@@ -1,0 +1,12 @@
+# Smoke test: Anthropic Claude docs model page
+# Verifies key content is present and page structure is intact.
+# Run: passe run tests/smoke-docs.passe
+
+goto https://docs.anthropic.com/en/docs/about-claude/models
+assert document.title.includes("Models")
+assert document.body.innerText.includes("Opus 4.6")
+assert document.body.innerText.includes("200K tokens")
+assert document.querySelectorAll("table").length > 0
+assert document.querySelector('a[href*="get-started"]') !== null
+log Anthropic docs model page: all checks passed
+screenshot /tmp/smoke-docs.png --viewport

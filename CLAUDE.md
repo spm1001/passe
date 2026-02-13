@@ -19,11 +19,12 @@ The 100x speed gap isn't the browser — it's the protocol. MCP needs a model ro
 | Need | Tool |
 |------|------|
 | Screenshot a page, interact with it, test it | **passe** |
-| Extract article content from a URL you haven't visited | `mise fetch` (trafilatura, server-side) |
+| Extract content with tables/code blocks intact | **passe** `read` (Readability preserves DOM structure) |
+| Extract article/blog content (cleaner, smaller) | `mise fetch` (trafilatura, better boilerplate stripping) |
 | Browse with the default Chrome profile interactively | `webctl` |
 | Full Playwright test suites with fixtures and assertions | Playwright directly |
 
-Passe is for **fast, scriptable, single-connection browser automation from the CLI**. Not for complex test frameworks. Not for content fetching (that's mise).
+Passe is for **fast, scriptable, single-connection browser automation from the CLI**. Also good for content extraction where DOM fidelity matters — `read` outperforms `mise fetch` on technical docs with tables and code examples because Readability.js works from the rendered DOM. For blog posts and articles where boilerplate stripping matters more, mise is cleaner.
 
 ## The Chrome connection model
 
@@ -133,11 +134,12 @@ Two Bash calls. For simple cases (cookie banners with obvious text), skip the sc
 ## Known footguns
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
-2. **`read` on non-article pages**: Readability.js returns garbage on dashboards and SPAs. Use `eval` or `snapshot` instead.
+2. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Use `eval` with `innerText` as the fallback.
 3. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 4. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
-5. **Tab handling**: Passe attaches to the first tab. No tab switching. If a click opens a new tab, passe stays on the old one.
-6. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
+5. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
+6. **Tab handling**: Passe attaches to the first tab. No tab switching. If a click opens a new tab, passe stays on the old one.
+7. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 
 ## Atomic commands
 
