@@ -1,21 +1,20 @@
 """
-Passe — fast CDP browser automation for Chrome Debug.
+Passe — fast CDP browser automation via line DSL.
 
 The kitchen pass: inspect everything before it goes out.
 
 Commands:
+  passe run -c 'goto URL; screenshot /tmp/out.png'
+  passe run script.passe
+  passe run - <<'EOF'
   passe screenshot <output.png>
-  passe navigate-screenshot <url> <output.png>
-  passe navigate-click-screenshot <url> <selector> <output.png>
-  passe navigate-fill-click-screenshot <url> <input-sel> <value> <submit-sel> <output.png>
-
-Connects to Chrome on port 9222 via raw WebSocket.
-Outputs timing JSON to stdout, saves screenshot to file.
+  passe eval <expression>
 """
 
 import asyncio
 import base64
 import json
+import shlex
 import sys
 import time
 import urllib.request
@@ -84,7 +83,10 @@ class CDPClient:
         result = await self.send('Target.getTargets')
         pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
         if not pages:
-            raise RuntimeError('No pages found')
+            # Chrome running with zero tabs (only service workers) — create one
+            created = await self.send('Target.createTarget', {'url': 'about:blank'})
+            target_id = created['result']['targetId']
+            pages = [{'targetId': target_id}]
         result = await self.send('Target.attachToTarget', {
             'targetId': pages[0]['targetId'],
             'flatten': True
@@ -136,14 +138,6 @@ async def connect(port=9222):
 
 # ── Actions ───────────────────────────────────────────────
 
-async def do_screenshot(client: CDPClient, full_page: bool = False) -> bytes:
-    params = {'format': 'png'}
-    if full_page:
-        params['captureBeyondViewport'] = True
-    result = await client.send('Page.captureScreenshot', params)
-    return base64.b64decode(result['result']['data'])
-
-
 async def do_navigate(client: CDPClient, url: str):
     await client.send('Page.enable')
     load_fut = client.wait_for_event('Page.loadEventFired')
@@ -151,26 +145,335 @@ async def do_navigate(client: CDPClient, url: str):
     await load_fut
 
 
+async def do_back(client: CDPClient):
+    result = await client.send('Page.getNavigationHistory')
+    entries = result['result']['entries']
+    idx = result['result']['currentIndex']
+    if idx > 0:
+        await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx - 1]['id']})
+        await asyncio.sleep(0.1)
+
+
+async def do_forward(client: CDPClient):
+    result = await client.send('Page.getNavigationHistory')
+    entries = result['result']['entries']
+    idx = result['result']['currentIndex']
+    if idx < len(entries) - 1:
+        await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx + 1]['id']})
+        await asyncio.sleep(0.1)
+
+
 async def do_click(client: CDPClient, selector: str):
-    result = await client.send('Runtime.evaluate', {
-        'expression': f'document.querySelector("{selector}").click()',
-        'awaitPromise': False
-    })
-    if 'exceptionDetails' in result.get('result', {}):
-        raise RuntimeError(f'Click failed on "{selector}"')
-
-
-async def do_fill(client: CDPClient, selector: str, value: str):
     js = f'''(() => {{
-        const el = document.querySelector("{selector}");
-        el.value = {json.dumps(value)};
-        el.dispatchEvent(new Event("input", {{bubbles: true}}));
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        el.click();
     }})()'''
     result = await client.send('Runtime.evaluate', {
         'expression': js, 'awaitPromise': False
     })
     if 'exceptionDetails' in result.get('result', {}):
-        raise RuntimeError(f'Fill failed on "{selector}"')
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'click failed: {desc}')
+
+
+async def do_click_text(client: CDPClient, label: str):
+    js = f'''(() => {{
+        const label = {json.dumps(label)};
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {{
+            const node = walker.currentNode;
+            if (node.textContent.trim() === label) {{
+                const el = node.parentElement;
+                if (el && el.offsetParent !== null) {{
+                    el.click();
+                    return 'clicked';
+                }}
+            }}
+        }}
+        // Partial match fallback
+        const walker2 = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        while (walker2.nextNode()) {{
+            const node = walker2.currentNode;
+            if (node.textContent.trim().includes(label)) {{
+                const el = node.parentElement;
+                if (el && el.offsetParent !== null) {{
+                    el.click();
+                    return 'clicked-partial';
+                }}
+            }}
+        }}
+        throw new Error('No visible element with text: ' + label);
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'click-text failed: {desc}')
+
+
+async def do_click_if(client: CDPClient, selector: str):
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (el) {{ el.click(); return 'clicked'; }}
+        return 'not-found';
+    }})()'''
+    await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+
+
+async def do_fill(client: CDPClient, selector: str, value: str):
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        el.value = {json.dumps(value)};
+        el.dispatchEvent(new Event("input", {{bubbles: true}}));
+        el.dispatchEvent(new Event("change", {{bubbles: true}}));
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'fill failed: {desc}')
+
+
+async def do_type(client: CDPClient, selector: str, text: str):
+    # Focus the element first
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        el.focus();
+        return true;
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'type focus failed: {desc}')
+    # Type each character via CDP Input.dispatchKeyEvent
+    for char in text:
+        await client.send('Input.dispatchKeyEvent', {
+            'type': 'keyDown', 'text': char, 'key': char,
+            'unmodifiedText': char
+        })
+        await client.send('Input.dispatchKeyEvent', {
+            'type': 'keyUp', 'key': char
+        })
+
+
+async def do_select(client: CDPClient, selector: str, value: str):
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        el.value = {json.dumps(value)};
+        el.dispatchEvent(new Event("change", {{bubbles: true}}));
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'select failed: {desc}')
+
+
+async def do_press(client: CDPClient, key: str):
+    # Map common key names to CDP key values
+    key_map = {
+        'enter': ('Enter', '\r', 13),
+        'tab': ('Tab', '\t', 9),
+        'escape': ('Escape', '', 27),
+        'backspace': ('Backspace', '', 8),
+        'delete': ('Delete', '', 46),
+        'arrowup': ('ArrowUp', '', 38),
+        'arrowdown': ('ArrowDown', '', 40),
+        'arrowleft': ('ArrowLeft', '', 37),
+        'arrowright': ('ArrowRight', '', 39),
+        'space': (' ', ' ', 32),
+    }
+    lower = key.lower()
+    if lower in key_map:
+        key_name, text, code = key_map[lower]
+    else:
+        key_name, text, code = key, key, ord(key) if len(key) == 1 else 0
+
+    params = {'type': 'keyDown', 'key': key_name, 'windowsVirtualKeyCode': code}
+    if text:
+        params['text'] = text
+    await client.send('Input.dispatchKeyEvent', params)
+    await client.send('Input.dispatchKeyEvent', {
+        'type': 'keyUp', 'key': key_name, 'windowsVirtualKeyCode': code
+    })
+
+
+async def do_hover(client: CDPClient, selector: str):
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        const rect = el.getBoundingClientRect();
+        return JSON.stringify({{x: rect.x + rect.width/2, y: rect.y + rect.height/2}});
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'hover failed: {desc}')
+    coords = json.loads(result['result']['result']['value'])
+    await client.send('Input.dispatchMouseEvent', {
+        'type': 'mouseMoved', 'x': coords['x'], 'y': coords['y']
+    })
+
+
+async def do_scroll(client: CDPClient, x: int, y: int):
+    await client.send('Runtime.evaluate', {
+        'expression': f'window.scrollTo({x}, {y})',
+        'awaitPromise': False
+    })
+
+
+async def do_screenshot(client: CDPClient, path: str = None,
+                        full_page: bool = True, viewport_only: bool = False) -> dict:
+    """Capture screenshot. Returns dict with path and size info."""
+    if viewport_only:
+        full_page = False
+
+    params = {'format': 'png'}
+    if full_page:
+        # Get full page dimensions
+        metrics = await client.send('Runtime.evaluate', {
+            'expression': 'JSON.stringify({w: document.documentElement.scrollWidth, h: Math.min(document.documentElement.scrollHeight, 16384)})',
+            'awaitPromise': False
+        })
+        dims = json.loads(metrics['result']['result']['value'])
+        params['clip'] = {
+            'x': 0, 'y': 0,
+            'width': dims['w'], 'height': dims['h'],
+            'scale': 1
+        }
+        params['captureBeyondViewport'] = True
+
+    result = await client.send('Page.captureScreenshot', params)
+    data = base64.b64decode(result['result']['data'])
+
+    if path is None:
+        path = f'/tmp/passe-{int(time.time())}.png'
+    with open(path, 'wb') as f:
+        f.write(data)
+
+    return {'file': path, 'kb': round(len(data) / 1024, 1)}
+
+
+async def do_snapshot(client: CDPClient, path: str = None) -> str:
+    """List interactive elements with CSS selectors."""
+    js = r'''(() => {
+        const results = [];
+        const interactives = document.querySelectorAll(
+            'a, button, input, select, textarea, [role="button"], [role="link"], ' +
+            '[role="tab"], [role="menuitem"], [onclick], [tabindex]'
+        );
+        let idx = 0;
+        for (const el of interactives) {
+            // Skip invisible elements
+            if (el.offsetParent === null && el.tagName !== 'BODY' &&
+                getComputedStyle(el).position !== 'fixed') continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) continue;
+
+            // Build CSS selector
+            let css;
+            if (el.id) {
+                css = '#' + CSS.escape(el.id);
+            } else if (el.name) {
+                css = el.tagName.toLowerCase() + '[name=' + JSON.stringify(el.name) + ']';
+            } else {
+                // Positional selector
+                const parent = el.parentElement;
+                if (parent) {
+                    const siblings = Array.from(parent.children).filter(c => c.tagName === el.tagName);
+                    const nth = siblings.indexOf(el) + 1;
+                    const parentSel = parent.id ? '#' + CSS.escape(parent.id)
+                        : parent.tagName.toLowerCase();
+                    css = parentSel + ' > ' + el.tagName.toLowerCase();
+                    if (siblings.length > 1) css += ':nth-of-type(' + nth + ')';
+                } else {
+                    css = el.tagName.toLowerCase();
+                }
+            }
+
+            // Element description
+            const tag = el.tagName.toLowerCase();
+            const type = el.type ? '[' + el.type + ']' : '';
+            const name = el.getAttribute('aria-label')
+                || el.getAttribute('placeholder')
+                || el.textContent.trim().substring(0, 40)
+                || '';
+
+            let line = '[' + idx + '] ' + tag + type + ' "' + name + '" css=' + css;
+            if (el.href) line += ' href=' + new URL(el.href, location.href).pathname;
+            results.push(line);
+            idx++;
+        }
+        return results.join('\n');
+    })()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    text = result['result']['result'].get('value', '')
+
+    if path:
+        with open(path, 'w') as f:
+            f.write(text)
+    return text
+
+
+async def do_read(client: CDPClient, path: str = None) -> str:
+    """Extract page content as markdown via Readability + Turndown."""
+    from ._libs import READABILITY_JS, TURNDOWN_JS, EXTRACT_JS
+
+    # Inject libraries then extract
+    combined = READABILITY_JS + ';\n' + TURNDOWN_JS + ';\n' + EXTRACT_JS
+    result = await client.send('Runtime.evaluate', {
+        'expression': combined, 'awaitPromise': False
+    })
+
+    raw = result['result']['result'].get('value', '{}')
+    data = json.loads(raw)
+    markdown = data.get('markdown', '')
+
+    if path:
+        with open(path, 'w') as f:
+            f.write(markdown)
+    return markdown
+
+
+async def do_viewport(client: CDPClient, width: int, height: int):
+    await client.send('Emulation.setDeviceMetricsOverride', {
+        'width': width, 'height': height,
+        'deviceScaleFactor': 1, 'mobile': width < 768
+    })
+
+
+async def do_wait_for(client: CDPClient, selector: str, timeout_ms: int = 10000):
+    """Poll for selector until visible or timeout."""
+    js = f'''document.querySelector({json.dumps(selector)}) !== null'''
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        result = await client.send('Runtime.evaluate', {
+            'expression': js, 'awaitPromise': False
+        })
+        if result['result']['result'].get('value') is True:
+            return
+        await asyncio.sleep(0.1)
+    raise RuntimeError(f'wait-for timed out after {timeout_ms}ms: {selector}')
+
+
+async def do_wait_navigation(client: CDPClient):
+    await client.send('Page.enable')
+    await client.wait_for_event('Page.loadEventFired', timeout=15.0)
 
 
 async def do_eval(client: CDPClient, expression: str) -> str:
@@ -178,120 +481,251 @@ async def do_eval(client: CDPClient, expression: str) -> str:
         'expression': expression, 'awaitPromise': True
     })
     r = result.get('result', {}).get('result', {})
-    return r.get('value', r.get('description', ''))
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'eval failed: {desc}')
+    return str(r.get('value', r.get('description', '')))
 
 
-def save_screenshot(data: bytes, path: str):
-    with open(path, 'wb') as f:
-        f.write(data)
+async def do_eval_to(client: CDPClient, path: str, expression: str) -> str:
+    result = await do_eval(client, expression)
+    with open(path, 'w') as f:
+        f.write(result)
+    return result
 
 
-# ── Compound commands ─────────────────────────────────────
+async def do_assert(client: CDPClient, expression: str):
+    result = await client.send('Runtime.evaluate', {
+        'expression': expression, 'awaitPromise': True
+    })
+    r = result.get('result', {}).get('result', {})
+    value = r.get('value', r.get('description', ''))
+    if not value:
+        raise RuntimeError(f'Assertion failed: {expression} (got {value!r})')
+
+
+# ── Script engine ─────────────────────────────────────────
+
+# eval/assert/log take the raw rest-of-line as a single argument — no shlex
+# quote stripping. This is intentional: `eval document.querySelector("h1")`
+# must preserve the JS quotes. shlex would strip them, turning "h1" into h1
+# which V8 interprets as a variable reference, not a string literal.
+RAW_REST_VERBS = {'eval', 'assert', 'log'}
+RAW_REST_AFTER_PATH_VERBS = {'eval-to'}
+
+
+def parse_script(text: str) -> list[tuple[str, list[str]]]:
+    """Parse script text into list of (verb, args) tuples."""
+    steps = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        # Split verb from rest, preserving raw text for expression verbs
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        verb = parts[0].lower()
+        rest = parts[1] if len(parts) > 1 else ''
+
+        if verb in RAW_REST_VERBS:
+            # eval, assert, log: entire rest is a single raw argument
+            args = [rest] if rest else []
+        elif verb in RAW_REST_AFTER_PATH_VERBS:
+            # eval-to: first arg is path (shlex), rest is raw expression
+            sub_parts = rest.split(None, 1)
+            if len(sub_parts) >= 2:
+                args = [sub_parts[0], sub_parts[1]]
+            elif sub_parts:
+                args = [sub_parts[0]]
+            else:
+                args = []
+        else:
+            # Standard verbs: full shlex parsing
+            try:
+                all_parts = shlex.split(line)
+            except ValueError:
+                all_parts = line.split()
+            args = all_parts[1:] if len(all_parts) > 1 else []
+
+        steps.append((verb, args))
+    return steps
+
+
+KNOWN_VERBS = {
+    'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
+    'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'viewport',
+    'wait', 'wait-for', 'wait-navigation', 'back', 'forward',
+    'eval', 'eval-to', 'assert', 'log',
+}
+
+
+async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> dict:
+    """Execute parsed script steps. Returns summary dict."""
+    total_t0 = time.monotonic()
+    files = []
+    ok = True
+    failed_at = None
+    fail_verb = None
+    fail_error = None
+
+    for i, (verb, args) in enumerate(steps):
+        if verb not in KNOWN_VERBS:
+            ok = False
+            failed_at = i
+            fail_verb = verb
+            fail_error = f'Unknown verb: {verb}'
+            step_info = {'i': i, 'verb': verb, 'error': fail_error}
+            print(json.dumps(step_info), file=sys.stderr)
+            break
+
+        t0 = time.monotonic()
+        step_info = {'i': i, 'verb': verb}
+
+        try:
+            if verb == 'goto':
+                await do_navigate(client, args[0])
+            elif verb == 'click':
+                await do_click(client, args[0])
+            elif verb == 'click-text':
+                await do_click_text(client, args[0])
+            elif verb == 'click-if':
+                await do_click_if(client, args[0])
+            elif verb == 'fill':
+                await do_fill(client, args[0], args[1])
+            elif verb == 'type':
+                await do_type(client, args[0], args[1])
+            elif verb == 'select':
+                await do_select(client, args[0], args[1])
+            elif verb == 'press':
+                await do_press(client, args[0])
+            elif verb == 'hover':
+                await do_hover(client, args[0])
+            elif verb == 'scroll':
+                await do_scroll(client, int(args[0]), int(args[1]))
+            elif verb == 'screenshot':
+                viewport_only = '--viewport' in args
+                clean_args = [a for a in args if a != '--viewport']
+                path = clean_args[0] if clean_args else None
+                info = await do_screenshot(client, path, viewport_only=viewport_only)
+                step_info['file'] = info['file']
+                step_info['kb'] = info['kb']
+                files.append(info['file'])
+            elif verb == 'snapshot':
+                path = args[0] if args else None
+                text = await do_snapshot(client, path)
+                if path:
+                    files.append(path)
+                else:
+                    step_info['result'] = text[:200]
+            elif verb == 'read':
+                path = args[0] if args else None
+                md = await do_read(client, path)
+                if path:
+                    files.append(path)
+                else:
+                    step_info['result'] = md[:200]
+            elif verb == 'viewport':
+                await do_viewport(client, int(args[0]), int(args[1]))
+            elif verb == 'wait':
+                await asyncio.sleep(int(args[0]) / 1000)
+            elif verb == 'wait-for':
+                timeout = int(args[1]) if len(args) > 1 else 10000
+                await do_wait_for(client, args[0], timeout)
+            elif verb == 'wait-navigation':
+                await do_wait_navigation(client)
+            elif verb == 'back':
+                await do_back(client)
+            elif verb == 'forward':
+                await do_forward(client)
+            elif verb == 'eval':
+                result = await do_eval(client, args[0])
+                step_info['result'] = str(result)
+            elif verb == 'eval-to':
+                await do_eval_to(client, args[0], args[1])
+                files.append(args[0])
+            elif verb == 'assert':
+                await do_assert(client, args[0])
+            elif verb == 'log':
+                print(f'[log] {args[0]}', file=sys.stderr)
+
+            step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
+
+        except Exception as e:
+            step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
+            step_info['error'] = str(e)
+            ok = False
+            failed_at = i
+            fail_verb = verb
+            fail_error = str(e)
+            print(json.dumps(step_info), file=sys.stderr)
+            break
+
+        print(json.dumps(step_info), file=sys.stderr)
+
+    total_ms = round((time.monotonic() - total_t0) * 1000, 1)
+    summary = {
+        'ok': ok,
+        'steps': (failed_at + 1) if failed_at is not None else len(steps),
+        'total_ms': total_ms,
+    }
+    if files:
+        summary['files'] = files
+    if not ok:
+        summary['failed_at'] = failed_at
+        summary['verb'] = fail_verb
+        summary['error'] = fail_error
+
+    return summary
+
+
+# ── CLI commands ──────────────────────────────────────────
+
+async def cmd_run(source: str, inline: str = None):
+    """Run a passe script from file, stdin, or inline."""
+    # Parse the script text
+    if inline:
+        # -c 'verb arg; verb arg' — semicolons as line separators
+        text = inline.replace(';', '\n')
+    elif source == '-':
+        text = sys.stdin.read()
+    else:
+        with open(source) as f:
+            text = f.read()
+
+    steps = parse_script(text)
+    if not steps:
+        print(json.dumps({'ok': True, 'steps': 0, 'total_ms': 0}))
+        return
+
+    ws, client = await connect()
+    try:
+        await client.attach_to_first_page()
+        await client.send('Page.enable')
+        summary = await run_script(client, steps)
+        print(json.dumps(summary))
+        sys.exit(0 if summary['ok'] else 1)
+    finally:
+        await client.stop()
+        await ws.close()
+
 
 async def cmd_screenshot(output: str):
-    timings = {}
-    t0 = time.monotonic()
+    """Atomic screenshot of current page."""
     ws, client = await connect()
-    timings['connect_ms'] = round((time.monotonic() - t0) * 1000, 1)
     try:
-        t1 = time.monotonic()
         await client.attach_to_first_page()
-        timings['attach_ms'] = round((time.monotonic() - t1) * 1000, 1)
-        t2 = time.monotonic()
-        img = await do_screenshot(client)
-        timings['capture_ms'] = round((time.monotonic() - t2) * 1000, 1)
-        save_screenshot(img, output)
-        timings['total_ms'] = round((time.monotonic() - t0) * 1000, 1)
-        timings['size_kb'] = round(len(img) / 1024, 1)
-        print(json.dumps(timings))
-    finally:
-        await client.stop()
-        await ws.close()
-
-
-async def cmd_navigate_screenshot(url: str, output: str):
-    timings = {}
-    t0 = time.monotonic()
-    ws, client = await connect()
-    timings['connect_ms'] = round((time.monotonic() - t0) * 1000, 1)
-    try:
-        t1 = time.monotonic()
-        await client.attach_to_first_page()
-        timings['attach_ms'] = round((time.monotonic() - t1) * 1000, 1)
-        t2 = time.monotonic()
-        await do_navigate(client, url)
-        timings['navigate_ms'] = round((time.monotonic() - t2) * 1000, 1)
-        t3 = time.monotonic()
-        img = await do_screenshot(client)
-        timings['capture_ms'] = round((time.monotonic() - t3) * 1000, 1)
-        save_screenshot(img, output)
-        timings['total_ms'] = round((time.monotonic() - t0) * 1000, 1)
-        timings['size_kb'] = round(len(img) / 1024, 1)
-        print(json.dumps(timings))
-    finally:
-        await client.stop()
-        await ws.close()
-
-
-async def cmd_navigate_click_screenshot(url: str, selector: str, output: str):
-    timings = {}
-    t0 = time.monotonic()
-    ws, client = await connect()
-    timings['connect_ms'] = round((time.monotonic() - t0) * 1000, 1)
-    try:
-        t1 = time.monotonic()
-        await client.attach_to_first_page()
-        timings['attach_ms'] = round((time.monotonic() - t1) * 1000, 1)
-        t2 = time.monotonic()
-        await do_navigate(client, url)
-        timings['navigate_ms'] = round((time.monotonic() - t2) * 1000, 1)
-        t3 = time.monotonic()
-        await do_click(client, selector)
-        timings['click_ms'] = round((time.monotonic() - t3) * 1000, 1)
-        t4 = time.monotonic()
-        img = await do_screenshot(client)
-        timings['capture_ms'] = round((time.monotonic() - t4) * 1000, 1)
-        save_screenshot(img, output)
-        timings['total_ms'] = round((time.monotonic() - t0) * 1000, 1)
-        timings['size_kb'] = round(len(img) / 1024, 1)
-        print(json.dumps(timings))
-    finally:
-        await client.stop()
-        await ws.close()
-
-
-async def cmd_navigate_fill_click_screenshot(url: str, input_sel: str, value: str, submit_sel: str, output: str):
-    timings = {}
-    t0 = time.monotonic()
-    ws, client = await connect()
-    timings['connect_ms'] = round((time.monotonic() - t0) * 1000, 1)
-    try:
-        t1 = time.monotonic()
-        await client.attach_to_first_page()
-        timings['attach_ms'] = round((time.monotonic() - t1) * 1000, 1)
-        t2 = time.monotonic()
-        await do_navigate(client, url)
-        timings['navigate_ms'] = round((time.monotonic() - t2) * 1000, 1)
-        t3 = time.monotonic()
-        await do_fill(client, input_sel, value)
-        timings['fill_ms'] = round((time.monotonic() - t3) * 1000, 1)
-        t4 = time.monotonic()
-        await do_click(client, submit_sel)
-        timings['click_ms'] = round((time.monotonic() - t4) * 1000, 1)
-        await asyncio.sleep(0.05)
-        t5 = time.monotonic()
-        img = await do_screenshot(client)
-        timings['capture_ms'] = round((time.monotonic() - t5) * 1000, 1)
-        save_screenshot(img, output)
-        timings['total_ms'] = round((time.monotonic() - t0) * 1000, 1)
-        timings['size_kb'] = round(len(img) / 1024, 1)
-        print(json.dumps(timings))
+        info = await do_screenshot(client, output)
+        print(json.dumps({
+            'ok': True, 'file': info['file'], 'kb': info['kb']
+        }))
     finally:
         await client.stop()
         await ws.close()
 
 
 async def cmd_eval(expression: str):
+    """Atomic JS eval on current page."""
     ws, client = await connect()
     try:
         await client.attach_to_first_page()
@@ -302,43 +736,51 @@ async def cmd_eval(expression: str):
         await ws.close()
 
 
-# ── CLI ───────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────
 
-def usage():
-    print("""passe — fast CDP browser automation
+USAGE = """passe — fast CDP browser automation
 
 Usage:
-  passe screenshot <output.png>
-  passe navigate-screenshot <url> <output.png>
-  passe navigate-click-screenshot <url> <selector> <output.png>
-  passe navigate-fill-click-screenshot <url> <input-sel> <value> <submit-sel> <output.png>
-  passe eval <javascript-expression>
+  passe run -c 'goto URL; screenshot /tmp/out.png'   Inline script
+  passe run script.passe                              Script file
+  passe run - <<'EOF' ... EOF                         Stdin
 
-Connects to Chrome on port 9222 via raw WebSocket.
-Outputs timing JSON to stdout, saves screenshot to file.
-""", file=sys.stderr)
-    sys.exit(1)
+  passe screenshot <output.png>                       Screenshot current page
+  passe eval <expression>                             Eval JS on current page
+
+DSL verbs:
+  goto, click, click-text, click-if, fill, type, select, press, hover,
+  scroll, screenshot, snapshot, read, viewport, wait, wait-for,
+  wait-navigation, back, forward, eval, eval-to, assert, log
+
+Output: NDJSON per step on stderr, summary JSON on stdout.
+"""
 
 
 def main():
     if len(sys.argv) < 2:
-        usage()
+        print(USAGE, file=sys.stderr)
+        sys.exit(1)
 
     cmd = sys.argv[1]
 
-    if cmd == 'screenshot' and len(sys.argv) == 3:
+    if cmd == 'run':
+        if len(sys.argv) >= 4 and sys.argv[2] == '-c':
+            # passe run -c 'inline script'
+            asyncio.run(cmd_run(None, inline=' '.join(sys.argv[3:])))
+        elif len(sys.argv) == 3:
+            # passe run script.passe  OR  passe run -
+            asyncio.run(cmd_run(sys.argv[2]))
+        else:
+            print(USAGE, file=sys.stderr)
+            sys.exit(1)
+    elif cmd == 'screenshot' and len(sys.argv) == 3:
         asyncio.run(cmd_screenshot(sys.argv[2]))
-    elif cmd == 'navigate-screenshot' and len(sys.argv) == 4:
-        asyncio.run(cmd_navigate_screenshot(sys.argv[2], sys.argv[3]))
-    elif cmd == 'navigate-click-screenshot' and len(sys.argv) == 5:
-        asyncio.run(cmd_navigate_click_screenshot(sys.argv[2], sys.argv[3], sys.argv[4]))
-    elif cmd == 'navigate-fill-click-screenshot' and len(sys.argv) == 7:
-        asyncio.run(cmd_navigate_fill_click_screenshot(
-            sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6]))
-    elif cmd == 'eval' and len(sys.argv) == 3:
-        asyncio.run(cmd_eval(sys.argv[2]))
+    elif cmd == 'eval' and len(sys.argv) >= 3:
+        asyncio.run(cmd_eval(' '.join(sys.argv[2:])))
     else:
-        usage()
+        print(USAGE, file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == '__main__':
