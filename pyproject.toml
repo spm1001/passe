@@ -11,10 +11,11 @@ dependencies = [
 passe = "passe.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=1.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
 
 [build-system]
 requires = ["hatchling"]

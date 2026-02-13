@@ -30,6 +30,7 @@ class CDPClient:
         self.msg_id = 0
         self.pending: dict[int, asyncio.Future] = {}
         self.event_waiters: dict[str, asyncio.Future] = {}
+        self.event_buffer: dict[str, dict] = {}
         self.session_id: str | None = None
         self.receiver_task: asyncio.Task | None = None
 
@@ -59,6 +60,8 @@ class CDPClient:
                     fut = self.event_waiters.pop(method)
                     if not fut.done():
                         fut.set_result(msg)
+                elif method:
+                    self.event_buffer[method] = msg
         except websockets.ConnectionClosed:
             pass
         except asyncio.CancelledError:
@@ -75,11 +78,15 @@ class CDPClient:
         return await asyncio.wait_for(fut, timeout=15.0)
 
     async def wait_for_event(self, method: str, timeout: float = 15.0) -> dict:
+        # Check buffer first — the event may have fired before we started waiting
+        if method in self.event_buffer:
+            return self.event_buffer.pop(method)
         fut = asyncio.get_event_loop().create_future()
         self.event_waiters[method] = fut
         return await asyncio.wait_for(fut, timeout=timeout)
 
     async def attach_to_first_page(self) -> str:
+        """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
         result = await self.send('Target.getTargets')
         pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
         if not pages:
@@ -92,7 +99,26 @@ class CDPClient:
             'flatten': True
         })
         self.session_id = result['result']['sessionId']
+        self._owns_tab = False
         return self.session_id
+
+    async def create_tab(self) -> str:
+        """Create a fresh tab and attach to it. Caller owns the tab lifecycle."""
+        created = await self.send('Target.createTarget', {'url': 'about:blank'})
+        self._target_id = created['result']['targetId']
+        result = await self.send('Target.attachToTarget', {
+            'targetId': self._target_id,
+            'flatten': True
+        })
+        self.session_id = result['result']['sessionId']
+        self._owns_tab = True
+        return self.session_id
+
+    async def close_tab(self):
+        """Close the tab if we created it."""
+        if getattr(self, '_owns_tab', False) and hasattr(self, '_target_id'):
+            await self.send('Target.closeTarget', {'targetId': self._target_id})
+            self._owns_tab = False
 
 
 def _chrome_running(port=9222) -> bool:
@@ -430,8 +456,11 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
-async def do_read(client: CDPClient, path: str = None) -> str:
-    """Extract page content as markdown via Readability + Turndown."""
+async def do_read(client: CDPClient, path: str = None) -> dict:
+    """Extract page content as markdown via Readability + Turndown.
+
+    Returns dict with 'markdown' and optional 'warning'.
+    """
     from ._libs import READABILITY_JS, TURNDOWN_JS, EXTRACT_JS
 
     # Inject libraries then extract
@@ -443,11 +472,24 @@ async def do_read(client: CDPClient, path: str = None) -> str:
     raw = result['result']['result'].get('value', '{}')
     data = json.loads(raw)
     markdown = data.get('markdown', '')
+    warning = None
+
+    if data.get('fallback'):
+        warning = 'Readability could not extract article — fell back to innerText'
+    elif data.get('pageTextLength', 0) > 0:
+        ratio = len(markdown) / data['pageTextLength']
+        if ratio < 0.10:
+            pct = round(ratio * 100, 1)
+            warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{data["pageTextLength"]} chars)'
+
+    if warning:
+        print(f'[read] warning: {warning}', file=sys.stderr)
 
     if path:
         with open(path, 'w') as f:
             f.write(markdown)
-    return markdown
+
+    return {'markdown': markdown, 'warning': warning}
 
 
 async def do_viewport(client: CDPClient, width: int, height: int):
@@ -620,11 +662,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['result'] = text[:200]
             elif verb == 'read':
                 path = args[0] if args else None
-                md = await do_read(client, path)
+                read_result = await do_read(client, path)
                 if path:
                     files.append(path)
                 else:
-                    step_info['result'] = md[:200]
+                    step_info['result'] = read_result['markdown'][:200]
+                if read_result.get('warning'):
+                    step_info['warning'] = read_result['warning']
             elif verb == 'viewport':
                 await do_viewport(client, int(args[0]), int(args[1]))
             elif verb == 'wait':
@@ -700,12 +744,13 @@ async def cmd_run(source: str, inline: str = None):
 
     ws, client = await connect()
     try:
-        await client.attach_to_first_page()
+        await client.create_tab()
         await client.send('Page.enable')
         summary = await run_script(client, steps)
         print(json.dumps(summary))
         sys.exit(0 if summary['ok'] else 1)
     finally:
+        await client.close_tab()
         await client.stop()
         await ws.close()
 
