@@ -14,6 +14,7 @@ Commands:
 import asyncio
 import base64
 import json
+import os
 import shlex
 import sys
 import time
@@ -137,16 +138,21 @@ class CDPClient:
             self._owns_tab = False
 
 
-def _chrome_running(port=9222) -> bool:
+def _cdp_base_url():
+    """Get CDP base URL from PASSE_CDP env var or default to localhost:9222."""
+    return os.environ.get('PASSE_CDP', 'http://localhost:9222')
+
+
+def _chrome_running() -> bool:
     try:
-        with urllib.request.urlopen(f'http://localhost:{port}/json/version', timeout=2) as resp:
+        with urllib.request.urlopen(f'{_cdp_base_url()}/json/version', timeout=2) as resp:
             return resp.status == 200
     except Exception:
         return False
 
 
 def _start_chrome(port=9222):
-    """Launch Chrome with debug profile if not running."""
+    """Launch Chrome with debug profile if not running. Only works locally."""
     import subprocess
     from pathlib import Path
     print("Starting Chrome Debug...", file=sys.stderr)
@@ -158,7 +164,7 @@ def _start_chrome(port=9222):
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
     for _ in range(30):
-        if _chrome_running(port):
+        if _chrome_running():
             print("Chrome Debug started.", file=sys.stderr)
             return
         time.sleep(0.5)
@@ -168,10 +174,22 @@ def _start_chrome(port=9222):
 
 async def connect(port=9222):
     """Connect to Chrome, starting it if needed. Return (websocket, CDPClient)."""
-    if not _chrome_running(port):
+    base_url = _cdp_base_url()
+    is_remote = 'localhost' not in base_url and '127.0.0.1' not in base_url
+    if not _chrome_running():
+        if is_remote:
+            print(f"Cannot reach Chrome at {base_url}", file=sys.stderr)
+            sys.exit(1)
         _start_chrome(port)
-    with urllib.request.urlopen(f'http://localhost:{port}/json/version', timeout=5) as resp:
+    with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
         ws_url = json.loads(resp.read())['webSocketDebuggerUrl']
+    # When connecting remotely, Chrome returns ws://localhost:... which won't work.
+    # Rewrite the WebSocket URL to match the actual CDP endpoint.
+    if is_remote:
+        from urllib.parse import urlparse
+        parsed_base = urlparse(base_url)
+        parsed_ws = urlparse(ws_url)
+        ws_url = f'ws://{parsed_base.netloc}{parsed_ws.path}'
     ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
     client = CDPClient(ws)
     await client.start()
