@@ -33,6 +33,8 @@ class CDPClient:
         self.event_buffer: dict[str, dict] = {}
         self.session_id: str | None = None
         self.receiver_task: asyncio.Task | None = None
+        self._target_id: str | None = None
+        self._owns_tab: bool = False
 
     async def start(self):
         self.receiver_task = asyncio.create_task(self._receiver())
@@ -115,9 +117,12 @@ class CDPClient:
         return self.session_id
 
     async def close_tab(self):
-        """Close the tab if we created it."""
-        if getattr(self, '_owns_tab', False) and hasattr(self, '_target_id'):
-            await self.send('Target.closeTarget', {'targetId': self._target_id})
+        """Close the tab if we created it. Safe to call during teardown."""
+        if self._owns_tab and self._target_id:
+            try:
+                await self.send('Target.closeTarget', {'targetId': self._target_id})
+            except (websockets.ConnectionClosed, asyncio.CancelledError):
+                pass
             self._owns_tab = False
 
 

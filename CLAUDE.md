@@ -36,6 +36,10 @@ If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-d
 
 **Never assume you have auth unless you've confirmed Chrome is Sameer's daily driver instance.**
 
+### Tab isolation
+
+`passe run` creates its own tab, runs the script there, and closes it on exit. Your existing tabs are never touched. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
+
 ## The DSL
 
 Passe has a line-based scripting language. One verb per line, parsed with `shlex.split()`.
@@ -134,11 +138,11 @@ Two Bash calls. For simple cases (cookie banners with obvious text), skip the sc
 ## Known footguns
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
-2. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Use `eval` with `innerText` as the fallback.
+2. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Passe now warns on stderr when extraction looks incomplete (<10% of page text) or falls back to innerText. Use `eval` with `innerText` as the deliberate fallback when `read` warns.
 3. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 4. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
 5. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
-6. **Tab handling**: Passe attaches to the first tab. No tab switching. If a click opens a new tab, passe stays on the old one.
+6. **Tab handling**: `passe run` creates and owns its own tab (closed on exit). Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
 7. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 
 ## Atomic commands
