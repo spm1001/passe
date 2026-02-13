@@ -473,39 +473,79 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
 
 
 async def do_read(client: CDPClient, path: str = None) -> dict:
-    """Extract page content as markdown via Readability + Turndown.
+    """Extract page content as markdown.
 
-    Returns dict with 'markdown' and optional 'warning'.
+    Cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText.
+    Returns dict with 'markdown', optional 'warning', and 'source'.
     """
-    from ._libs import READABILITY_JS, TURNDOWN_JS, EXTRACT_JS
+    # Get page HTML and metadata from Chrome in two evals
+    # (outerHTML as raw string avoids JSON double-escaping)
+    html = await do_eval(client, 'document.documentElement.outerHTML')
+    meta_raw = await do_eval(
+        client,
+        'JSON.stringify({textLength: document.body.innerText.length, url: window.location.href})'
+    )
+    meta = json.loads(meta_raw)
+    page_text_length = meta.get('textLength', 0)
+    page_url = meta.get('url', '')
 
-    # Inject libraries then extract
-    combined = READABILITY_JS + ';\n' + TURNDOWN_JS + ';\n' + EXTRACT_JS
-    result = await client.send('Runtime.evaluate', {
-        'expression': combined, 'awaitPromise': False
-    })
-
-    raw = result['result']['result'].get('value', '{}')
-    data = json.loads(raw)
-    markdown = data.get('markdown', '')
+    markdown = None
+    source = None
     warning = None
 
-    if data.get('fallback'):
-        warning = 'Readability could not extract article — fell back to innerText'
-    elif data.get('pageTextLength', 0) > 0:
-        ratio = len(markdown) / data['pageTextLength']
+    # Stage 1: trafilatura — Python-side extraction from rendered HTML
+    try:
+        import trafilatura
+        extracted = trafilatura.extract(
+            html, url=page_url,
+            include_formatting=True, include_links=True, include_tables=True,
+        )
+        if extracted and (page_text_length == 0 or len(extracted) / page_text_length >= 0.10):
+            markdown = extracted
+            source = 'trafilatura'
+    except Exception:
+        pass  # fall through to Readability
+
+    # Stage 2: Readability.js + Turndown — browser-side extraction
+    if markdown is None:
+        from ._libs import READABILITY_JS, TURNDOWN_JS, EXTRACT_JS
+        combined = READABILITY_JS + ';\n' + TURNDOWN_JS + ';\n' + EXTRACT_JS
+        result = await client.send('Runtime.evaluate', {
+            'expression': combined, 'awaitPromise': False
+        })
+        raw = result['result']['result'].get('value', '{}')
+        data = json.loads(raw)
+        md = data.get('markdown', '')
+
+        if data.get('fallback'):
+            # Stage 3: Readability failed — EXTRACT_JS already fell back to innerText
+            markdown = md
+            source = 'innerText'
+            warning = 'trafilatura and Readability both failed — fell back to innerText'
+        elif md:
+            markdown = md
+            source = 'readability'
+        else:
+            markdown = ''
+            source = 'innerText'
+            warning = 'All extractors returned empty'
+
+    # Ratio warning for trafilatura/readability paths
+    if source in ('trafilatura', 'readability') and page_text_length > 0 and markdown:
+        ratio = len(markdown) / page_text_length
         if ratio < 0.10:
             pct = round(ratio * 100, 1)
-            warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{data["pageTextLength"]} chars)'
+            warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{page_text_length} chars)'
 
     if warning:
         print(f'[read] warning: {warning}', file=sys.stderr)
+    print(f'[read] source: {source}', file=sys.stderr)
 
     if path:
         with open(path, 'w') as f:
             f.write(markdown)
 
-    return {'markdown': markdown, 'warning': warning}
+    return {'markdown': markdown, 'warning': warning, 'source': source}
 
 
 async def do_viewport(client: CDPClient, width: int, height: int):
@@ -707,6 +747,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['result'] = read_result['markdown'][:200]
                 if read_result.get('warning'):
                     step_info['warning'] = read_result['warning']
+                if read_result.get('source'):
+                    step_info['source'] = read_result['source']
             elif verb == 'viewport':
                 await do_viewport(client, int(args[0]), int(args[1]))
             elif verb == 'wait':

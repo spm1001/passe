@@ -19,12 +19,12 @@ The 100x speed gap isn't the browser — it's the protocol. MCP needs a model ro
 | Need | Tool |
 |------|------|
 | Screenshot a page, interact with it, test it | **passe** |
-| Extract content with tables/code blocks intact | **passe** `read` (Readability preserves DOM structure) |
-| Extract article/blog content (cleaner, smaller) | `mise fetch` (trafilatura, better boilerplate stripping) |
+| Extract content from any page (articles, SPAs, dashboards) | **passe** `read` (trafilatura primary, Readability.js fallback) |
+| Extract Workspace content (Drive docs, Gmail) | `mise fetch` |
 | Browse with the default Chrome profile interactively | `webctl` |
 | Full Playwright test suites with fixtures and assertions | Playwright directly |
 
-Passe is for **fast, scriptable, single-connection browser automation from the CLI**. Also good for content extraction where DOM fidelity matters — `read` outperforms `mise fetch` on technical docs with tables and code examples because Readability.js works from the rendered DOM. For blog posts and articles where boilerplate stripping matters more, mise is cleaner.
+Passe is for **fast, scriptable, single-connection browser automation from the CLI**. The `read` verb extracts clean markdown from any page type — it gets the rendered HTML from Chrome, runs trafilatura Python-side for extraction, and falls back to Readability.js+Turndown if trafilatura can't handle it. Use `mise fetch` for Google Workspace content (Drive, Gmail).
 
 ## The Chrome connection model
 
@@ -89,7 +89,7 @@ passe run tests/checkout-flow.passe
 **Observation:**
 - `screenshot [path]` — full-page PNG (entire scrollable document, not just viewport). Use `--viewport` for viewport-only.
 - `snapshot [path]` — list interactive elements with CSS selectors. For element discovery.
-- `read [path]` — extract page content as markdown (Readability.js + Turndown.js). Best for articles/blogs. Falls back to innerText on SPAs.
+- `read [path]` — extract page content as markdown. Cascade: trafilatura (Python-side, handles any page type) → Readability.js+Turndown (browser-side) → innerText. Logs `source` in step output.
 - `eval <expression>` — run JS, result to stdout
 - `eval-to <path> <expression>` — run JS, write result to file (for large data)
 
@@ -157,7 +157,7 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
 2. **`type` on React controlled inputs**: `type` dispatches CDP key events, but React controlled components may ignore them — the input stays empty. Workaround: set value via JS with the native setter to trigger React's synthetic event system: `eval var el = document.querySelector('input'); var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(el, 'text'); el.dispatchEvent(new Event('input', { bubbles: true }));`
-3. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Passe now warns on stderr when extraction looks incomplete (<10% of page text) or falls back to innerText. Use `eval` with `innerText` as the deliberate fallback when `read` warns.
+3. **`read` extraction cascade**: Trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete. The `source` field in step output tells you which extractor was used (`trafilatura`, `readability`, or `innerText`). Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages, (d) **shadow DOM content is invisible** — `outerHTML` doesn't serialize shadow roots, so web components (e.g. MDN's `<mdn-code-example>`) lose content silently (passe-zigico tracks the fix), (e) **large data tables may be stripped** — trafilatura's content heuristic can classify big tables as boilerplate even with `include_tables=True` (passe-bosevu tracks the fix), (f) **extraction timing matters** — `outerHTML` captures whatever the DOM contains at that moment; slow-hydrating SPAs need adequate `wait` before `read`. Use `eval` with `innerText` as a deliberate escape hatch.
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
 6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
@@ -194,6 +194,6 @@ Single file: `src/passe/cli.py`. The `CDPClient` class handles WebSocket message
 
 When a `wait_for_event` waiter is active, events go directly to the waiter. When a waiter has timed out (stale cancelled future), `_receiver` falls through to the buffer instead of silently dropping the event. This matters for the `click → wait-navigation` pattern where navigation completes between the click and the wait.
 
-`src/passe/_libs.py` bundles Readability.js and Turndown.js as string constants, injected into the browser via `Runtime.evaluate` for the `read` verb.
+`src/passe/_libs.py` bundles Readability.js and Turndown.js as string constants, used as the fallback extraction path when trafilatura can't handle a page. The primary `read` path gets outerHTML from Chrome and runs trafilatura Python-side.
 
 No external dependencies beyond `websockets`. Everything else runs in Chrome's V8.
