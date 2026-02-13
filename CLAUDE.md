@@ -47,9 +47,9 @@ Passe has a line-based scripting language. One verb per line, parsed with `shlex
 ### Invocation patterns
 
 ```bash
-# Short scripts (≤4 verbs): inline with -c, semicolons as separators
-# ⚠️ -c replaces ALL semicolons with newlines — this breaks JS expressions
-# containing semicolons. Use heredoc if your eval/assert has JS semicolons.
+# Short scripts (≤4 verbs): inline with -c, '; ' as separator
+# Verb-aware split: '; ' only splits when followed by a known verb,
+# so JS semicolons in eval/assert survive (e.g. 'eval var x = 1; x').
 passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 
 # Longer scripts (5+ verbs): heredoc. ALWAYS use this for complex flows.

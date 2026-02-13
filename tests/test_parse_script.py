@@ -15,7 +15,7 @@ parser question its own existence.
 
 import pytest
 
-from passe.cli import parse_script
+from passe.cli import parse_script, split_inline
 
 
 # ── Chamber 01: The Basics ────────────────────────────────
@@ -304,11 +304,10 @@ screenshot /tmp/logged-in.png"""
         assert result[4] == ("wait-for", [".dashboard", "15000"])
 
     def test_inline_semicolon_converted(self):
-        """cmd_run converts semicolons to newlines before parse_script.
-        parse_script itself sees newlines. Verify it handles the result."""
-        # Simulate what cmd_run does: replace ; with \n
+        """cmd_run splits on '; ' before verb keywords, then parse_script
+        sees newlines. Verify it handles the result."""
         inline = "goto https://example.com; screenshot /tmp/out.png"
-        text = inline.replace(";", "\n")
+        text = split_inline(inline)
         result = parse_script(text)
         assert result == [
             ("goto", ["https://example.com"]),
@@ -461,25 +460,48 @@ class TestRegressions:
         # This is a single eval with the full raw rest
         assert result == [("eval", ["var x = 1; x + 1"])]
 
-    def test_inline_semicolons_corrupt_eval_expressions(self):
-        """Inline -c mode's replace(';', '\\n') runs BEFORE parse_script,
-        destroying semicolons inside JS expressions.
+    def test_inline_semicolons_preserve_eval_expressions(self):
+        """Verb-aware split_inline keeps JS semicolons intact.
 
-        'goto URL; eval var x = 1; x' becomes three lines:
-          goto URL       → fine
-          eval var x = 1 → truncated JS
-          x              → unknown verb
+        'goto URL; eval var x = 1; x' splits into two lines:
+          goto URL               → verb boundary
+          eval var x = 1; x      → '; x' not a verb, so rejoined
 
-        parse_script's raw-rest protection for eval can't help because
-        the semicolons are already gone. Known limitation: use heredoc
-        for scripts with JS semicolons, not -c inline mode.
+        The '; ' before 'x' is preserved because 'x' isn't a known verb.
         """
         inline = 'goto https://example.com; eval var x = 1; x'
-        text = inline.replace(';', '\n')  # What cmd_run does
+        text = split_inline(inline)
+        steps = parse_script(text)
+
+        assert len(steps) == 2
+        assert steps[0] == ('goto', ['https://example.com'])
+        assert steps[1] == ('eval', ['var x = 1; x'])
+
+    def test_inline_assert_with_js_semicolons(self):
+        """assert expressions with JS semicolons survive split_inline."""
+        inline = 'goto https://example.com; assert document.title.split(";").length > 0'
+        text = split_inline(inline)
+        steps = parse_script(text)
+
+        assert len(steps) == 2
+        assert steps[0] == ('goto', ['https://example.com'])
+        assert steps[1] == ('assert', ['document.title.split(";").length > 0'])
+
+    def test_inline_multiple_verbs_no_js_semicolons(self):
+        """Plain multi-verb inline splits cleanly."""
+        inline = 'goto https://example.com; wait 500; screenshot /tmp/out.png'
+        text = split_inline(inline)
         steps = parse_script(text)
 
         assert len(steps) == 3
-        # eval is truncated at the semicolon
-        assert steps[1] == ('eval', ['var x = 1'])
-        # remainder becomes an unknown verb
-        assert steps[2][0] == 'x'
+        assert steps[0][0] == 'goto'
+        assert steps[1] == ('wait', ['500'])
+        assert steps[2][0] == 'screenshot'
+
+    def test_inline_no_space_after_semicolon_preserved(self):
+        """Semicolons without trailing space are never DSL separators."""
+        inline = 'eval var x=1;x+1'
+        text = split_inline(inline)
+        steps = parse_script(text)
+
+        assert steps == [('eval', ['var x=1;x+1'])]

@@ -572,6 +572,28 @@ RAW_REST_VERBS = {'eval', 'assert', 'log'}
 RAW_REST_AFTER_PATH_VERBS = {'eval-to'}
 
 
+def split_inline(text: str) -> str:
+    """Split inline -c text on '; ' but only when followed by a known verb.
+
+    Plain replace(';', newline) destroys semicolons inside JS expressions.
+    This verb-aware split keeps JS intact:
+      'goto URL; eval var x = 1; x'  →  two lines, not three
+    """
+    parts = text.split('; ')
+    if len(parts) <= 1:
+        return text
+
+    lines = [parts[0]]
+    for part in parts[1:]:
+        first_word = part.split(None, 1)[0].lower() if part.strip() else ''
+        if first_word in KNOWN_VERBS:
+            lines.append(part)
+        else:
+            # Not a verb — this semicolon was inside an expression, rejoin
+            lines[-1] += '; ' + part
+    return '\n'.join(lines)
+
+
 def parse_script(text: str) -> list[tuple[str, list[str]]]:
     """Parse script text into list of (verb, args) tuples."""
     steps = []
@@ -752,8 +774,8 @@ async def cmd_run(source: str, inline: str = None):
     """Run a passe script from file, stdin, or inline."""
     # Parse the script text
     if inline:
-        # -c 'verb arg; verb arg' — semicolons as line separators
-        text = inline.replace(';', '\n')
+        # -c 'verb arg; verb arg' — verb-aware split preserves JS semicolons
+        text = split_inline(inline)
     elif source == '-':
         text = sys.stdin.read()
     else:
