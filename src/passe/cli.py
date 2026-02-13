@@ -472,38 +472,6 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
-# JS that serializes outerHTML but includes shadow DOM content.
-# Fast path: single tree-walker scan; if no shadow roots, returns outerHTML directly.
-# When shadow DOM exists, custom recursive serializer inlines shadow root children
-# before light DOM children (slot fallbacks are harmless — trafilatura strips dupes).
-SHADOW_FLATTEN_JS = r'''(() => {
-  const scan = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
-  let hasShadow = false;
-  while (scan.nextNode()) {
-    if (scan.currentNode.shadowRoot) { hasShadow = true; break; }
-  }
-  if (!hasShadow) return document.documentElement.outerHTML;
-
-  const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)$/i;
-  function ser(node) {
-    if (node.nodeType === 3) return node.textContent;
-    if (node.nodeType !== 1) return '';
-    const tag = node.tagName.toLowerCase();
-    let s = '<' + tag;
-    for (const a of node.attributes)
-      s += ' ' + a.name + '="' + a.value.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '"';
-    s += '>';
-    if (VOID.test(tag)) return s;
-    if (node.shadowRoot)
-      for (const c of node.shadowRoot.childNodes) s += ser(c);
-    for (const c of node.childNodes) s += ser(c);
-    s += '</' + tag + '>';
-    return s;
-  }
-  return ser(document.documentElement);
-})()'''
-
-
 async def do_read(client: CDPClient, path: str = None) -> dict:
     """Extract page content as markdown.
 
@@ -511,8 +479,7 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
     Returns dict with 'markdown', optional 'warning', and 'source'.
     """
     # Get page HTML (with shadow DOM flattened) and metadata from Chrome.
-    # SHADOW_FLATTEN_JS returns outerHTML directly when no shadow roots exist,
-    # otherwise walks the DOM to inline shadow root content before serialization.
+    from ._libs import SHADOW_FLATTEN_JS
     html = await do_eval(client, SHADOW_FLATTEN_JS)
     meta_raw = await do_eval(
         client,
@@ -540,6 +507,47 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
         print('[read] trafilatura not installed — falling back to Readability', file=sys.stderr)
     except Exception as exc:
         print(f'[read] trafilatura failed: {exc} — falling back to Readability', file=sys.stderr)
+
+    # Stage 1.5: Structural quality gate — detect table/code-block loss.
+    # Trafilatura can pass the 10% text ratio check but strip critical structure.
+    # Thresholds (empirical, tested against ISO-3166-1, Python docs, Wikipedia):
+    #   - Binary:        page >= 5 data rows, output has 0 table markers → reject
+    #   - Proportional:  page >= 10 data rows, output < 25% of page rows → reject
+    #   - Code blocks:   page >= 2 long <pre> blocks, output has 0 fences → reject
+    #   - Skip DOM eval: output has 20+ table rows AND code fences (clearly preserved)
+    if source == 'trafilatura':
+        import re
+        # Count pipe-table data rows (exclude separator rows like |---|---|)
+        output_table_rows = len(re.findall(r'^\|.*\w.*\|', markdown, re.MULTILINE))
+        has_code = bool(re.search(r'^```', markdown, re.MULTILINE))
+
+        # Only query DOM when output might be missing structure
+        if output_table_rows < 20 or not has_code:
+            dom_raw = await do_eval(client, (
+                'JSON.stringify({dataRows:[...document.querySelectorAll("tr")]'
+                '.filter(r=>r.querySelectorAll("td").length>=2).length,'
+                'codeBlocks:[...document.querySelectorAll("pre")]'
+                '.filter(e=>e.textContent.length>50).length})'
+            ))
+            dom = json.loads(dom_raw)
+            lost = []
+            page_rows = dom.get('dataRows', 0)
+            # Binary check: page has tables, output has none
+            if output_table_rows == 0 and page_rows >= 5:
+                lost.append(f'{page_rows} table rows')
+            # Proportional check: big table mostly stripped
+            elif page_rows >= 10 and output_table_rows < page_rows * 0.25:
+                lost.append(f'{page_rows} table rows (got {output_table_rows})')
+            if not has_code and dom.get('codeBlocks', 0) >= 2:
+                lost.append(f'{dom["codeBlocks"]} code blocks')
+
+            if lost:
+                print(
+                    f'[read] quality gate: trafilatura dropped {", ".join(lost)}'
+                    ' — falling to Readability', file=sys.stderr
+                )
+                markdown = None
+                source = None
 
     # Stage 2: Readability.js + Turndown — browser-side extraction
     if markdown is None:

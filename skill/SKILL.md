@@ -101,7 +101,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 |-----------|----------------|-----|
 | **Cookie banner visible** | Just the banner text | Dismiss banner first (scout → click) |
 | **Animated/dynamic content** | Massive garbage | Use `eval` with `innerText` |
-| **Large data tables** | Tables stripped as boilerplate | Use `eval` to grab the table directly |
+| **Large data tables** | Quality gate auto-detects loss, falls to Readability | Rarely needed now; `eval` as escape hatch |
 | **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `read` |
 
 **Decision tree:**

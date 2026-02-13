@@ -41,6 +41,9 @@ def _traf_module(return_value=None, side_effect=None):
 
 # ── Stage 1: trafilatura succeeds ──────────────────────────
 
+NO_STRUCTURE = json.dumps({'dataRows': 0, 'codeBlocks': 0})
+
+
 @pytest.mark.asyncio
 async def test_trafilatura_succeeds():
     """Trafilatura extracts good content — used as primary."""
@@ -48,6 +51,7 @@ async def test_trafilatura_succeeds():
     client = _make_client(
         '<html><body><article>' + content + '</article></body></html>',
         json.dumps({'textLength': 600, 'url': 'http://example.com'}),
+        NO_STRUCTURE,
     )
     mock_traf = _traf_module(return_value=content)
     with patch.dict(sys.modules, {'trafilatura': mock_traf}):
@@ -66,6 +70,7 @@ async def test_trafilatura_file_output(tmp_path):
     client = _make_client(
         '<html></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+        NO_STRUCTURE,
     )
     outfile = str(tmp_path / 'out.md')
     mock_traf = _traf_module(return_value=content)
@@ -84,6 +89,7 @@ async def test_trafilatura_passes_url():
     client = _make_client(
         '<html></html>',
         json.dumps({'textLength': 600, 'url': 'http://example.com/article'}),
+        NO_STRUCTURE,
     )
     mock_traf = _traf_module(return_value=content)
     with patch.dict(sys.modules, {'trafilatura': mock_traf}):
@@ -327,3 +333,197 @@ async def test_warning_written_to_file_still_warns(tmp_path):
     assert result['warning'] is not None
     with open(outfile) as f:
         assert f.read() == 'tiny'
+
+
+# ── Structural quality gate ──────────────────────────────
+
+@pytest.mark.asyncio
+async def test_table_loss_triggers_readability_fallback(capsys):
+    """Page has 10 data rows but trafilatura output has no tables → reject."""
+    content = 'A plain text summary without any tables or pipes'
+    readability_data = json.dumps({
+        'title': 'Country Codes',
+        'markdown': '| Code | Country |\n|---|---|\n| US | United States |',
+        'length': 50,
+        'pageTextLength': 200,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 10, 'codeBlocks': 0}),  # DOM signals
+        readability_data,  # Readability fallback
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    assert '|' in result['markdown']
+    stderr = capsys.readouterr().err
+    assert 'quality gate' in stderr
+    assert 'table rows' in stderr
+
+
+@pytest.mark.asyncio
+async def test_code_loss_triggers_readability_fallback(capsys):
+    """Page has 3 code blocks but trafilatura output has none → reject."""
+    content = 'Just prose about Python asyncio patterns'
+    readability_data = json.dumps({
+        'title': 'Asyncio Docs',
+        'markdown': '```python\nawait asyncio.sleep(1)\n```',
+        'length': 40,
+        'pageTextLength': 200,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 0, 'codeBlocks': 3}),  # DOM signals
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    assert '```' in result['markdown']
+    stderr = capsys.readouterr().err
+    assert 'quality gate' in stderr
+    assert 'code blocks' in stderr
+
+
+@pytest.mark.asyncio
+async def test_both_table_and_code_loss(capsys):
+    """Page has both tables and code, trafilatura drops both → reject."""
+    content = 'A' * 200  # Long enough to pass 10% ratio check
+    readability_data = json.dumps({
+        'title': 'Rich Page',
+        'markdown': '| A | B |\n```\ncode\n```',
+        'length': 30,
+        'pageTextLength': 200,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 8, 'codeBlocks': 4}),
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    stderr = capsys.readouterr().err
+    assert 'table rows' in stderr
+    assert 'code blocks' in stderr
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_passes_when_output_has_tables():
+    """Trafilatura preserves table markers → gate passes (small table, binary check)."""
+    content = 'Title\n\n| Code | Country |\n|---|---|\n| US | United States |'
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 5, 'codeBlocks': 0}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_passes_when_output_has_code():
+    """Trafilatura preserves code fences → gate passes."""
+    content = 'Example:\n\n```python\nprint("hello")\n```\n'
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 0, 'codeBlocks': 3}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_skips_when_page_has_little_structure():
+    """Page has <5 table rows — gate doesn't reject even if output lacks tables."""
+    content = 'A' * 200
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 3, 'codeBlocks': 1}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_proportional_table_loss_triggers_fallback(capsys):
+    """Page has 100 data rows, output has 5 table rows (<25%) → reject."""
+    # 5 pipe-table rows with word chars — passes binary check but fails proportional
+    rows = '\n'.join(f'| {i} | data |' for i in range(5))
+    content = 'A' * 200 + '\n' + rows
+    readability_data = json.dumps({
+        'title': 'Big Table',
+        'markdown': '| full | table |',
+        'length': 50,
+        'pageTextLength': 500,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 100, 'codeBlocks': 0}),
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    stderr = capsys.readouterr().err
+    assert 'quality gate' in stderr
+    assert '100 table rows' in stderr
+    assert 'got 5' in stderr
+
+
+@pytest.mark.asyncio
+async def test_proportional_check_passes_when_enough_rows():
+    """Page has 20 data rows, output has 15 (75%) → pass."""
+    rows = '\n'.join(f'| {i} | data |' for i in range(15))
+    content = 'A' * 100 + '\n' + rows
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 200, 'url': 'http://example.com'}),
+        json.dumps({'dataRows': 20, 'codeBlocks': 0}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_quality_gate_no_dom_eval_when_output_rich():
+    """Output has 20+ table rows AND code → DOM eval skipped (only 2 send calls)."""
+    rows = '\n'.join(f'| {i} | data |' for i in range(25))
+    content = rows + '\n\n```\ncode\n```'
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 500, 'url': 'http://example.com'}),
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+    # Only 2 calls: outerHTML + meta. No DOM signal eval.
+    assert client.send.call_count == 2
