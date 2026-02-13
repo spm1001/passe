@@ -25,6 +25,11 @@ import websockets
 class CDPClient:
     """Minimal CDP client with future-based message routing."""
 
+    # Only buffer events that wait_for_event callers actually consume.
+    # The buffer is dict[str, dict] (one entry per method), so max size
+    # equals len(BUFFERED_EVENTS). Everything else is dropped if no waiter.
+    BUFFERED_EVENTS = frozenset({'Page.loadEventFired'})
+
     def __init__(self, ws):
         self.ws = ws
         self.msg_id = 0
@@ -62,7 +67,9 @@ class CDPClient:
                     fut = self.event_waiters.pop(method)
                     if not fut.done():
                         fut.set_result(msg)
-                elif method:
+                        continue
+                # No active waiter (or waiter was stale/timed-out) — buffer if whitelisted
+                if method in self.BUFFERED_EVENTS:
                     self.event_buffer[method] = msg
         except websockets.ConnectionClosed:
             pass
@@ -93,7 +100,9 @@ class CDPClient:
         pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
         if not pages:
             # Chrome running with zero tabs (only service workers) — create one
-            created = await self.send('Target.createTarget', {'url': 'about:blank'})
+            created = await self.send('Target.createTarget', {
+                'url': 'about:blank', 'background': True,
+            })
             target_id = created['result']['targetId']
             pages = [{'targetId': target_id}]
         result = await self.send('Target.attachToTarget', {
@@ -106,7 +115,9 @@ class CDPClient:
 
     async def create_tab(self) -> str:
         """Create a fresh tab and attach to it. Caller owns the tab lifecycle."""
-        created = await self.send('Target.createTarget', {'url': 'about:blank'})
+        created = await self.send('Target.createTarget', {
+            'url': 'about:blank', 'background': True,
+        })
         self._target_id = created['result']['targetId']
         result = await self.send('Target.attachToTarget', {
             'targetId': self._target_id,
@@ -724,6 +735,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
         summary['failed_at'] = failed_at
         summary['verb'] = fail_verb
         summary['error'] = fail_error
+
+    # Capture final URL (post-redirect) before the tab is closed.
+    # Best effort — don't fail the run for this.
+    try:
+        summary['final_url'] = await do_eval(client, 'window.location.href')
+    except Exception:
+        pass
 
     return summary
 

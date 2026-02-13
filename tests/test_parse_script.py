@@ -460,3 +460,26 @@ class TestRegressions:
         result = parse_script('eval var x = 1; x + 1')
         # This is a single eval with the full raw rest
         assert result == [("eval", ["var x = 1; x + 1"])]
+
+    def test_inline_semicolons_corrupt_eval_expressions(self):
+        """Inline -c mode's replace(';', '\\n') runs BEFORE parse_script,
+        destroying semicolons inside JS expressions.
+
+        'goto URL; eval var x = 1; x' becomes three lines:
+          goto URL       → fine
+          eval var x = 1 → truncated JS
+          x              → unknown verb
+
+        parse_script's raw-rest protection for eval can't help because
+        the semicolons are already gone. Known limitation: use heredoc
+        for scripts with JS semicolons, not -c inline mode.
+        """
+        inline = 'goto https://example.com; eval var x = 1; x'
+        text = inline.replace(';', '\n')  # What cmd_run does
+        steps = parse_script(text)
+
+        assert len(steps) == 3
+        # eval is truncated at the semicolon
+        assert steps[1] == ('eval', ['var x = 1'])
+        # remainder becomes an unknown verb
+        assert steps[2][0] == 'x'
