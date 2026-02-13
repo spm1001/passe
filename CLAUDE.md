@@ -80,7 +80,7 @@ passe run tests/checkout-flow.passe
 - `click <selector>` — CSS selector click
 - `click-text <"label">` — find by text content, click. Great for cookie banners: `click-text "Reject"`
 - `click-if <selector>` — click if exists, silently continue if not. For optional elements.
-- `type <selector> <text>` — character-by-character typing. **Use this for SPAs** (React, Vue, etc.)
+- `type <selector> <text>` — character-by-character via `Input.insertText`. Works with React, Vue, and plain HTML. Auto-detects controlled inputs and falls back to `nativeInputValueSetter` if needed.
 - `fill <selector> <value>` — set value directly. Faster but may not trigger framework reactivity. Use `type` if unsure.
 - `select <selector> <value>` — dropdown
 - `press <key>` — keypress (Enter, Tab, Escape, etc.)
@@ -158,7 +158,7 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 ## Known footguns
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
-2. **`type` on React controlled inputs**: `type` dispatches CDP key events, but React controlled components may ignore them — the input stays empty. Workaround: set value via JS with the native setter to trigger React's synthetic event system: `eval var el = document.querySelector('input'); var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(el, 'text'); el.dispatchEvent(new Event('input', { bubbles: true }));`
+2. **`type` on React controlled inputs**: `type` now auto-detects when CDP key events don't take (React controlled components). After typing, it checks the element's value — if it doesn't match, it automatically falls back to `nativeInputValueSetter` + `dispatchEvent('input')`. You'll see `[type] React controlled input detected` on stderr when this happens. No manual workaround needed.
 3. **`read` extraction cascade**: Trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete (including when trafilatura import fails or throws). The `source` field in step output tells you which extractor was used (`trafilatura`, `readability`, or `innerText`). Shadow DOM content is now flattened before serialization — web components (e.g. MDN's `<mdn-code-example>`) are inlined into the HTML so both extractors can see them. A structural quality gate detects when trafilatura drops tables or code blocks: it counts pipe-table rows and code fences in the output, compares against DOM signals (table data rows, `<pre>` blocks), and falls through to Readability if significant structure was lost (e.g. ISO country codes page: 294 data rows stripped → Readability preserves them). Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages, (d) **extraction timing matters** — the HTML captures whatever the DOM contains at that moment; slow-hydrating SPAs need adequate `wait` before `read`. Use `read --source readability` or `read --source innertext` to bypass the cascade for debugging. Use `eval` with `innerText` as a deliberate escape hatch.
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.

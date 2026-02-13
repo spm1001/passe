@@ -64,7 +64,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `click <selector>` — CSS selector
 - `click-text <"label">` — find by visible text, click
 - `click-if <selector>` — click if exists, silently continue if not
-- `type <selector> <text>` — character-by-character via CDP. **Use for SPAs.**
+- `type <selector> <text>` — character-by-character via CDP. **Use for SPAs.** Auto-detects React controlled inputs and falls back to nativeInputValueSetter if key events don't take.
 - `fill <selector> <value>` — set value directly. Fast but may skip React/Vue reactivity.
 - `select <selector> <value>` — dropdown
 - `press <key>` — Enter, Tab, Escape, etc.

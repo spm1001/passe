@@ -296,15 +296,30 @@ async def do_type(client: CDPClient, selector: str, text: str):
     if 'exceptionDetails' in result.get('result', {}):
         desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
         raise RuntimeError(f'type focus failed: {desc}')
-    # Type each character via CDP Input.dispatchKeyEvent
+    # Type each character via CDP Input.insertText (matches Puppeteer).
+    # dispatchKeyEvent rawKeyDown/char/keyUp dispatches events but doesn't
+    # reliably insert characters. insertText triggers beforeinput + input
+    # events which frameworks (React, Vue) pick up correctly.
     for char in text:
-        await client.send('Input.dispatchKeyEvent', {
-            'type': 'keyDown', 'text': char, 'key': char,
-            'unmodifiedText': char
+        await client.send('Input.insertText', {'text': char})
+    # Auto-detect React controlled inputs: if value didn't take, use nativeInputValueSetter
+    check_js = f'document.querySelector({json.dumps(selector)}).value'
+    actual = await do_eval(client, check_js)
+    if actual != text:
+        fallback_js = f'''(() => {{
+            const el = document.querySelector({json.dumps(selector)});
+            const proto = el.tagName === 'TEXTAREA'
+                ? window.HTMLTextAreaElement.prototype
+                : window.HTMLInputElement.prototype;
+            const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+            setter.call(el, {json.dumps(text)});
+            el.dispatchEvent(new Event('input', {{ bubbles: true }}));
+            el.dispatchEvent(new Event('change', {{ bubbles: true }}));
+        }})()'''
+        await client.send('Runtime.evaluate', {
+            'expression': fallback_js, 'awaitPromise': False
         })
-        await client.send('Input.dispatchKeyEvent', {
-            'type': 'keyUp', 'key': char
-        })
+        print(f'[type] React controlled input detected — used nativeInputValueSetter', file=sys.stderr)
 
 
 async def do_select(client: CDPClient, selector: str, value: str):
