@@ -139,15 +139,30 @@ EOF
 
 Two Bash calls. For simple cases (cookie banners with obvious text), skip the scout and use `click-text "Reject"` directly.
 
+## Authenticated API pattern
+
+Passe runs inside Chrome's authenticated session. For SPAs where `type`/`press Enter` don't trigger the UI, skip the UI and call the API directly via `eval` + `fetch()`:
+
+```bash
+passe run - <<'EOF'
+goto https://intranet.example.com/search
+wait 1000
+eval-to /tmp/results.json (async () => { const token = document.querySelector('input[name="csrf"]').value; const resp = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token }, body: JSON.stringify({ query: 'parental leave' }) }); return JSON.stringify(await resp.json()); })()
+EOF
+```
+
+The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM. No cookie management or auth plumbing needed — Chrome *is* the authenticated session.
+
 ## Known footguns
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
-2. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Passe now warns on stderr when extraction looks incomplete (<10% of page text) or falls back to innerText. Use `eval` with `innerText` as the deliberate fallback when `read` warns.
-3. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
-4. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
-5. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
-6. **Tab handling**: `passe run` creates and owns its own tab (closed on exit). Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
-7. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
+2. **`type` on React controlled inputs**: `type` dispatches CDP key events, but React controlled components may ignore them — the input stays empty. Workaround: set value via JS with the native setter to trigger React's synthetic event system: `eval var el = document.querySelector('input'); var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(el, 'text'); el.dispatchEvent(new Event('input', { bubbles: true }));`
+3. **`read` failure modes**: Readability.js works well on articles/blogs and technical docs with tables, but fails on: (a) pages with cookie banners (returns just the banner text), (b) pages with JS animations (saw 3.9MB of garbage from a typewriter effect), (c) SPAs with tab/panel navigation (returns nav chrome). Passe now warns on stderr when extraction looks incomplete (<10% of page text) or falls back to innerText. Use `eval` with `innerText` as the deliberate fallback when `read` warns.
+4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
+5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
+6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
+7. **Tab handling**: `passe run` creates and owns its own tab (closed on exit). Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
+8. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 
 ## Atomic commands
 
