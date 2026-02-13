@@ -259,6 +259,31 @@ class TestEvalTo:
         assert result == [("eval-to", ["/tmp/links.json", expr])]
 
 
+# ── Chamber 05b: eval-file — The File Reader ─────────────
+# "The Device has been modified so that it can also
+#  read files. It does not, however, judge their contents."
+
+
+class TestEvalFile:
+    """eval-file and eval-file-to take shlex-parsed paths. No raw JS."""
+
+    def test_eval_file_single_path(self):
+        result = parse_script('eval-file /tmp/analysis.js')
+        assert result == [("eval-file", ["/tmp/analysis.js"])]
+
+    def test_eval_file_quoted_path(self):
+        result = parse_script('eval-file "/tmp/my analysis.js"')
+        assert result == [("eval-file", ["/tmp/my analysis.js"])]
+
+    def test_eval_file_to_two_paths(self):
+        result = parse_script('eval-file-to /tmp/out.json /tmp/extract.js')
+        assert result == [("eval-file-to", ["/tmp/out.json", "/tmp/extract.js"])]
+
+    def test_eval_file_to_quoted_paths(self):
+        result = parse_script('eval-file-to "/tmp/my output.json" "/tmp/my script.js"')
+        assert result == [("eval-file-to", ["/tmp/my output.json", "/tmp/my script.js"])]
+
+
 # ── Chamber 06: Real Scripts ──────────────────────────────
 # "Remember, the Aperture Science 'Bring Your Daughter to
 #  Work Day' is the perfect time to have her tested."

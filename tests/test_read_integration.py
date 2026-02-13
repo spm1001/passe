@@ -14,7 +14,7 @@ from urllib.request import urlopen
 
 import pytest
 
-from passe.cli import connect, do_navigate, do_read
+from passe.cli import connect, do_navigate, do_read, do_eval_file, do_eval_file_to
 
 
 def _chrome_available():
@@ -121,6 +121,46 @@ async def test_ratio_warning_fires_on_spa(spa_server):
         assert 'incomplete' in result['warning'], (
             f'Expected ratio warning but got: {result["warning"]}'
         )
+    finally:
+        await client.close_tab()
+        await client.stop()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_eval_file_reads_and_executes(spa_server, tmp_path):
+    """eval-file reads multi-line JS from a file and evaluates it."""
+    js_file = tmp_path / 'test.js'
+    js_file.write_text('(() => {\n  const x = 40;\n  const y = 2;\n  return x + y;\n})()')
+
+    ws, client = await connect()
+    try:
+        await client.create_tab()
+        await client.send('Page.enable')
+        await do_navigate(client, f'http://127.0.0.1:{spa_server}')
+        result = await do_eval_file(client, str(js_file))
+        assert result == '42'
+    finally:
+        await client.close_tab()
+        await client.stop()
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_eval_file_to_writes_result(spa_server, tmp_path):
+    """eval-file-to reads JS from file and writes result to output file."""
+    js_file = tmp_path / 'extract.js'
+    js_file.write_text('document.title')
+    out_file = tmp_path / 'title.txt'
+
+    ws, client = await connect()
+    try:
+        await client.create_tab()
+        await client.send('Page.enable')
+        await do_navigate(client, f'http://127.0.0.1:{spa_server}')
+        result = await do_eval_file_to(client, str(out_file), str(js_file))
+        assert result == 'Dashboard App'
+        assert out_file.read_text() == 'Dashboard App'
     finally:
         await client.close_tab()
         await client.stop()

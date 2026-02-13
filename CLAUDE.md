@@ -92,6 +92,8 @@ passe run tests/checkout-flow.passe
 - `read [path]` — extract page content as markdown. Cascade: trafilatura (Python-side, handles any page type) → Readability.js+Turndown (browser-side) → innerText. Logs `source` in step output.
 - `eval <expression>` — run JS, result to stdout
 - `eval-to <path> <expression>` — run JS, write result to file (for large data)
+- `eval-file <js-path>` — read JS from a file and evaluate. Use for multi-line JS — avoids minification.
+- `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
 **Control:**
 - `wait <ms>` — sleep
@@ -157,12 +159,15 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
 2. **`type` on React controlled inputs**: `type` dispatches CDP key events, but React controlled components may ignore them — the input stays empty. Workaround: set value via JS with the native setter to trigger React's synthetic event system: `eval var el = document.querySelector('input'); var setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set; setter.call(el, 'text'); el.dispatchEvent(new Event('input', { bubbles: true }));`
-3. **`read` extraction cascade**: Trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete. The `source` field in step output tells you which extractor was used (`trafilatura`, `readability`, or `innerText`). Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages, (d) **shadow DOM content is invisible** — `outerHTML` doesn't serialize shadow roots, so web components (e.g. MDN's `<mdn-code-example>`) lose content silently (passe-zigico tracks the fix), (e) **large data tables may be stripped** — trafilatura's content heuristic can classify big tables as boilerplate even with `include_tables=True` (passe-bosevu tracks the fix), (f) **extraction timing matters** — `outerHTML` captures whatever the DOM contains at that moment; slow-hydrating SPAs need adequate `wait` before `read`. Use `eval` with `innerText` as a deliberate escape hatch.
+3. **`read` extraction cascade**: Trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete (including when trafilatura import fails or throws). The `source` field in step output tells you which extractor was used (`trafilatura`, `readability`, or `innerText`). Shadow DOM content is now flattened before serialization — web components (e.g. MDN's `<mdn-code-example>`) are inlined into the HTML so both extractors can see them. Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages, (d) **large data tables may be stripped** — trafilatura's content heuristic can classify big tables as boilerplate even with `include_tables=True` (passe-bosevu tracks the fix), (e) **extraction timing matters** — the HTML captures whatever the DOM contains at that moment; slow-hydrating SPAs need adequate `wait` before `read`. Use `eval` with `innerText` as a deliberate escape hatch.
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
 6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
 7. **Tab handling**: `passe run` creates and owns its own tab (closed on exit). Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
 8. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
+9. **DOM mutation during TreeWalker**: If using `eval` with `createTreeWalker` to walk and mutate the DOM (e.g. `replaceChild`), the walker loses its position and silently stops after 1-2 nodes. Collect nodes into an array first, then mutate in a second pass.
+10. **Multi-line JS in `eval`**: The DSL is line-based — `eval` takes one line. For multi-line JS, use `eval-file <path>` which reads from a file. Don't minify JS to fit on one line.
+11. **`eval-file-to` arg order**: `eval-file-to <out-path> <js-path>` — output first, source second. Consistent with `eval-to <path> <expression>` but opposite to Unix `cp src dest` convention.
 
 ## Atomic commands
 

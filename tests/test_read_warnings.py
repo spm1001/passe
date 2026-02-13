@@ -141,8 +141,8 @@ async def test_trafilatura_too_short_falls_to_readability():
 
 
 @pytest.mark.asyncio
-async def test_trafilatura_exception_falls_to_readability():
-    """Trafilatura throws — falls through gracefully to Readability."""
+async def test_trafilatura_exception_falls_to_readability(capsys):
+    """Trafilatura throws — falls through with warning to stderr."""
     readability_data = json.dumps({
         'title': 'Test',
         'markdown': 'D' * 500,
@@ -159,6 +159,32 @@ async def test_trafilatura_exception_falls_to_readability():
         result = await do_read(client)
 
     assert result['source'] == 'readability'
+    stderr = capsys.readouterr().err
+    assert 'trafilatura failed: extraction failed' in stderr
+    assert 'falling back to Readability' in stderr
+
+
+@pytest.mark.asyncio
+async def test_trafilatura_import_error_warns(capsys):
+    """Trafilatura not installed — warning on stderr, falls to Readability."""
+    readability_data = json.dumps({
+        'title': 'Test',
+        'markdown': 'E' * 500,
+        'length': 500,
+        'pageTextLength': 600,
+    })
+    client = _make_client(
+        '<html></html>',
+        json.dumps({'textLength': 600, 'url': 'http://example.com'}),
+        readability_data,
+    )
+    # Remove trafilatura from sys.modules so the import fails
+    with patch.dict(sys.modules, {'trafilatura': None}):
+        result = await do_read(client)
+
+    assert result['source'] == 'readability'
+    stderr = capsys.readouterr().err
+    assert 'trafilatura not installed' in stderr
 
 
 # ── Stage 3: both fail, innerText fallback ─────────────────

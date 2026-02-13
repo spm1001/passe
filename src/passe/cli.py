@@ -472,15 +472,48 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
+# JS that serializes outerHTML but includes shadow DOM content.
+# Fast path: single tree-walker scan; if no shadow roots, returns outerHTML directly.
+# When shadow DOM exists, custom recursive serializer inlines shadow root children
+# before light DOM children (slot fallbacks are harmless — trafilatura strips dupes).
+SHADOW_FLATTEN_JS = r'''(() => {
+  const scan = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_ELEMENT);
+  let hasShadow = false;
+  while (scan.nextNode()) {
+    if (scan.currentNode.shadowRoot) { hasShadow = true; break; }
+  }
+  if (!hasShadow) return document.documentElement.outerHTML;
+
+  const VOID = /^(area|base|br|col|embed|hr|img|input|link|meta|source|track|wbr)$/i;
+  function ser(node) {
+    if (node.nodeType === 3) return node.textContent;
+    if (node.nodeType !== 1) return '';
+    const tag = node.tagName.toLowerCase();
+    let s = '<' + tag;
+    for (const a of node.attributes)
+      s += ' ' + a.name + '="' + a.value.replace(/&/g,'&amp;').replace(/"/g,'&quot;') + '"';
+    s += '>';
+    if (VOID.test(tag)) return s;
+    if (node.shadowRoot)
+      for (const c of node.shadowRoot.childNodes) s += ser(c);
+    for (const c of node.childNodes) s += ser(c);
+    s += '</' + tag + '>';
+    return s;
+  }
+  return ser(document.documentElement);
+})()'''
+
+
 async def do_read(client: CDPClient, path: str = None) -> dict:
     """Extract page content as markdown.
 
     Cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText.
     Returns dict with 'markdown', optional 'warning', and 'source'.
     """
-    # Get page HTML and metadata from Chrome in two evals
-    # (outerHTML as raw string avoids JSON double-escaping)
-    html = await do_eval(client, 'document.documentElement.outerHTML')
+    # Get page HTML (with shadow DOM flattened) and metadata from Chrome.
+    # SHADOW_FLATTEN_JS returns outerHTML directly when no shadow roots exist,
+    # otherwise walks the DOM to inline shadow root content before serialization.
+    html = await do_eval(client, SHADOW_FLATTEN_JS)
     meta_raw = await do_eval(
         client,
         'JSON.stringify({textLength: document.body.innerText.length, url: window.location.href})'
@@ -503,8 +536,10 @@ async def do_read(client: CDPClient, path: str = None) -> dict:
         if extracted and (page_text_length == 0 or len(extracted) / page_text_length >= 0.10):
             markdown = extracted
             source = 'trafilatura'
-    except Exception:
-        pass  # fall through to Readability
+    except ImportError:
+        print('[read] trafilatura not installed — falling back to Readability', file=sys.stderr)
+    except Exception as exc:
+        print(f'[read] trafilatura failed: {exc} — falling back to Readability', file=sys.stderr)
 
     # Stage 2: Readability.js + Turndown — browser-side extraction
     if markdown is None:
@@ -588,6 +623,20 @@ async def do_eval(client: CDPClient, expression: str) -> str:
 async def do_eval_to(client: CDPClient, path: str, expression: str) -> str:
     result = await do_eval(client, expression)
     with open(path, 'w') as f:
+        f.write(result)
+    return result
+
+
+async def do_eval_file(client: CDPClient, js_path: str) -> str:
+    """Read JS from a file and evaluate it. Avoids single-line minification."""
+    with open(js_path) as f:
+        expression = f.read()
+    return await do_eval(client, expression)
+
+
+async def do_eval_file_to(client: CDPClient, out_path: str, js_path: str) -> str:
+    result = await do_eval_file(client, js_path)
+    with open(out_path, 'w') as f:
         f.write(result)
     return result
 
@@ -676,7 +725,7 @@ KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
     'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'viewport',
     'wait', 'wait-for', 'wait-navigation', 'back', 'forward',
-    'eval', 'eval-to', 'assert', 'log',
+    'eval', 'eval-to', 'eval-file', 'eval-file-to', 'assert', 'log',
 }
 
 
@@ -767,6 +816,12 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 step_info['result'] = str(result)
             elif verb == 'eval-to':
                 await do_eval_to(client, args[0], args[1])
+                files.append(args[0])
+            elif verb == 'eval-file':
+                result = await do_eval_file(client, args[0])
+                step_info['result'] = str(result)[:200]
+            elif verb == 'eval-file-to':
+                await do_eval_file_to(client, args[0], args[1])
                 files.append(args[0])
             elif verb == 'assert':
                 await do_assert(client, args[0])
@@ -883,7 +938,8 @@ Usage:
 DSL verbs:
   goto, click, click-text, click-if, fill, type, select, press, hover,
   scroll, screenshot, snapshot, read, viewport, wait, wait-for,
-  wait-navigation, back, forward, eval, eval-to, assert, log
+  wait-navigation, back, forward, eval, eval-to, eval-file,
+  eval-file-to, assert, log
 
 Output: NDJSON per step on stderr, summary JSON on stdout.
 """

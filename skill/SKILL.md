@@ -19,11 +19,11 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 | Need | Tool |
 |------|------|
 | Screenshot, interact, test a page | **passe** |
-| Extract content with tables/code blocks intact | **passe** `read` (Readability preserves DOM structure) |
-| Extract article/blog content (cleaner, smaller) | `mise fetch` (trafilatura, better boilerplate stripping) |
+| Extract content from any web page | **passe** `read` (trafilatura primary, Readability fallback, shadow DOM flattened) |
+| Extract Google Workspace content (Drive, Gmail) | `mise fetch` |
 | Full test suites with fixtures | Playwright directly |
 
-**`read` vs `mise fetch` for content extraction:** `mise fetch` is faster and produces cleaner output for articles and blog posts. But `passe read` preserves tables and code blocks more faithfully because Readability.js works from the rendered DOM. For technical docs, `passe read` is more reliable.
+**Passe owns web, mise owns Workspace — no overlap.** `passe read` uses trafilatura (Python-side) as the primary extractor for any page type, falling back to Readability.js+Turndown (browser-side) if trafilatura returns too little. Shadow DOM content is flattened before extraction.
 
 ## When not to use
 
@@ -73,9 +73,11 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [path]` — full-page PNG (capped at 16384px). `--viewport` for viewport-only.
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [path]` — extract page as markdown (Readability.js + Turndown.js). **Articles/blogs only** — see Content Extraction below.
+- `read [path]` — extract page as markdown. Three-stage cascade: trafilatura (Python-side, handles any page type) → Readability.js+Turndown (browser-side) → innerText. Shadow DOM is flattened before extraction. See Content Extraction below.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
+- `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
+- `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
 **Control:**
 - `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-navigation`
@@ -91,19 +93,22 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 ## Content extraction: `read` vs `eval`
 
-`read` uses Readability.js — designed for articles. It **fails silently** on three page types:
+`read` uses a three-stage cascade: trafilatura (Python-side, handles most page types) → Readability.js+Turndown (browser-side fallback) → innerText. Shadow DOM content is flattened before extraction, so web components (MDN code examples, etc.) are visible to both extractors. The `source` field in step output tells you which extractor was used.
+
+**Known weaknesses:**
 
 | Page type | `read` produces | Fix |
 |-----------|----------------|-----|
 | **Cookie banner visible** | Just the banner text | Dismiss banner first (scout → click) |
-| **Animated/dynamic content** | Massive garbage (saw 3.9MB from a typewriter animation) | Use `eval` with `innerText` |
-| **SPAs with tabs/panels** | Nav chrome, not content | Click the right tab, then `eval` the panel |
+| **Animated/dynamic content** | Massive garbage | Use `eval` with `innerText` |
+| **Large data tables** | Tables stripped as boilerplate | Use `eval` to grab the table directly |
+| **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `read` |
 
 **Decision tree:**
 
-1. **Article or blog post?** → `read` (Readability's sweet spot)
-2. **SPA, dashboard, or interactive page?** → `eval` with selector chain
-3. **Cookie banner present?** → scout + dismiss first, then decide read vs eval
+1. **Any page with text content?** → try `read` first (trafilatura handles articles, dashboards, SPAs)
+2. **`read` output missing content?** → check `source` field; try `eval` with selector chain
+3. **Cookie banner present?** → scout + dismiss first, then `read`
 4. **Huge or garbled output?** → page has animations or dynamic content; switch to `eval`
 
 **The `eval` fallback pattern** — chain selectors with `||` for resilience:
@@ -175,14 +180,39 @@ EOF
 
 This pattern works as a `.passe` file for reusable site verification.
 
+## Multi-line JS: use `eval-file`
+
+The DSL is line-based — `eval` and `eval-to` take a single line of JS. For anything beyond a one-liner, write the JS to a file and use `eval-file`:
+
+```bash
+# Write multi-line JS (use Write tool, not heredoc-into-eval)
+# Then reference it in the script:
+passe run - <<'EOF'
+goto https://example.com
+wait 1000
+eval-file /tmp/my-analysis.js
+screenshot /tmp/result.png
+EOF
+
+# Or with output capture:
+passe run - <<'EOF'
+goto https://example.com
+eval-file-to /tmp/data.json /tmp/extract-data.js
+EOF
+```
+
+This replaces the painful minify → bash variable → unquoted heredoc dance.
+
 ## Anti-patterns
 
 - **`fill` vs `type`**: Default to `type` for SPAs. `fill` is for plain HTML forms only.
-- **`read` on everything**: `read` is for articles. SPAs, dashboards, animated pages → `eval`.
 - **Guessing cookie button text**: `click-text "Reject"` fails more often than it works. Scout first.
 - **`click-text` with multiple matches**: Clicks first visible match. Be specific.
 - **Tab handling**: Passe attaches to the first tab. No tab switching.
 - **Script errors are fatal**: No mid-script recovery. Partial timing still emitted to stderr.
+- **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
+- **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
+- **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
 
 ## Atomic commands
 
