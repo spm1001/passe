@@ -38,7 +38,7 @@ If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-d
 
 ### Tab isolation
 
-`passe run` creates its own tab, runs the script there, and closes it on exit. Your existing tabs are never touched. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
+`passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on exit. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
 
 ## The DSL
 
@@ -48,6 +48,8 @@ Passe has a line-based scripting language. One verb per line, parsed with `shlex
 
 ```bash
 # Short scripts (≤4 verbs): inline with -c, semicolons as separators
+# ⚠️ -c replaces ALL semicolons with newlines — this breaks JS expressions
+# containing semicolons. Use heredoc if your eval/assert has JS semicolons.
 passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 
 # Longer scripts (5+ verbs): heredoc. ALWAYS use this for complex flows.
@@ -102,8 +104,10 @@ passe run tests/checkout-flow.passe
 ### Output protocol
 
 - **stderr**: NDJSON per step — `{"i":0,"verb":"goto","ms":342}`
-- **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":["/tmp/out.png"]}`
+- **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":["/tmp/out.png"],"final_url":"https://example.com/"}`
 - **Exit code**: 0 success, 1 failure
+
+`final_url` is the page's `window.location.href` captured after the last step, before the tab closes. Use it for post-redirect metadata — this is the only moment the URL is available since the tab is destroyed in `cmd_run`'s finally block.
 
 ## The scout-then-act pattern
 
@@ -168,6 +172,12 @@ uv tool install /Users/modha/Repos/passe --force --reinstall
 ## Architecture
 
 Single file: `src/passe/cli.py`. The `CDPClient` class handles WebSocket message routing with future-based responses. `do_*` functions are the action layer. `run_script()` is the execution engine that dispatches verbs to actions.
+
+### Event buffering
+
+`CDPClient.BUFFERED_EVENTS` is a frozenset whitelist of events to buffer when no waiter is registered. Currently only `Page.loadEventFired`. The buffer is `dict[str, dict]` (one entry per method name) — max size equals whitelist size.
+
+When a `wait_for_event` waiter is active, events go directly to the waiter. When a waiter has timed out (stale cancelled future), `_receiver` falls through to the buffer instead of silently dropping the event. This matters for the `click → wait-navigation` pattern where navigation completes between the click and the wait.
 
 `src/passe/_libs.py` bundles Readability.js and Turndown.js as string constants, injected into the browser via `Runtime.evaluate` for the `read` verb.
 
