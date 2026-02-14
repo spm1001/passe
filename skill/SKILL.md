@@ -8,6 +8,9 @@ description: >
   'click a button on', 'fill a form on', 'scrape this page', 'test this page'.
   For clean article/blog extraction use mise fetch; for DOM-faithful extraction
   (tables, code blocks, technical docs) use passe read. (user)
+requires:
+  - cli: passe
+    check: "passe --version"
 ---
 
 # passe — fast CDP browser automation

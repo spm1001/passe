@@ -1061,7 +1061,11 @@ def main():
 
     cmd = sys.argv[1]
 
-    if cmd == 'run':
+    if cmd in ('--version', '-V'):
+        from importlib.metadata import version
+        print(f"passe {version('passe')}")
+        sys.exit(0)
+    elif cmd == 'run':
         if len(sys.argv) >= 4 and sys.argv[2] == '-c':
             # passe run -c 'inline script'
             asyncio.run(cmd_run(None, inline=' '.join(sys.argv[3:])))
