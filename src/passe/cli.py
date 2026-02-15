@@ -114,6 +114,24 @@ class CDPClient:
         self._owns_tab = False
         return self.session_id
 
+    async def attach_to_visible_page(self) -> str:
+        """Attach to the first non-chrome:// page tab. For --reuse-tab."""
+        result = await self.send('Target.getTargets')
+        pages = [t for t in result['result']['targetInfos']
+                 if t['type'] == 'page' and not t.get('url', '').startswith('chrome://')]
+        if not pages:
+            # Fall back to any page tab
+            pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
+        if not pages:
+            raise RuntimeError('No browser tab to reuse — open a tab first')
+        result = await self.send('Target.attachToTarget', {
+            'targetId': pages[0]['targetId'],
+            'flatten': True
+        })
+        self.session_id = result['result']['sessionId']
+        self._owns_tab = False
+        return self.session_id
+
     async def create_tab(self) -> str:
         """Create a fresh tab and attach to it. Caller owns the tab lifecycle."""
         created = await self.send('Target.createTarget', {
@@ -1074,8 +1092,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
 
 # ── CLI commands ──────────────────────────────────────────
 
-async def cmd_run(source: str, inline: str = None):
+async def cmd_run(source: str, inline: str = None,
+                  keep_tab: bool = False, reuse_tab: bool = False):
     """Run a passe script from file, stdin, or inline."""
+    # --reuse-tab implies --keep-tab (don't close someone else's tab)
+    if reuse_tab:
+        keep_tab = True
+
     # Parse the script text
     if inline:
         # -c 'verb arg; verb arg' — verb-aware split preserves JS semicolons
@@ -1093,13 +1116,17 @@ async def cmd_run(source: str, inline: str = None):
 
     ws, client = await connect()
     try:
-        await client.create_tab()
+        if reuse_tab:
+            await client.attach_to_visible_page()
+        else:
+            await client.create_tab()
         await client.send('Page.enable')
         summary = await run_script(client, steps)
         print(json.dumps(summary))
         sys.exit(0 if summary['ok'] else 1)
     finally:
-        await client.close_tab()
+        if not keep_tab:
+            await client.close_tab()
         await client.stop()
         await ws.close()
 
@@ -1164,12 +1191,20 @@ def main():
         print(f"passe {version('passe')}")
         sys.exit(0)
     elif cmd == 'run':
-        if len(sys.argv) >= 4 and sys.argv[2] == '-c':
-            # passe run -c 'inline script'
-            asyncio.run(cmd_run(None, inline=' '.join(sys.argv[3:])))
-        elif len(sys.argv) == 3:
-            # passe run script.passe  OR  passe run -
-            asyncio.run(cmd_run(sys.argv[2]))
+        # Extract flags before positional args
+        run_args = sys.argv[2:]
+        keep_tab = '--keep-tab' in run_args
+        reuse_tab = '--reuse-tab' in run_args
+        run_args = [a for a in run_args if a not in ('--keep-tab', '--reuse-tab')]
+
+        if len(run_args) >= 2 and run_args[0] == '-c':
+            # passe run [-flags] -c 'inline script'
+            asyncio.run(cmd_run(None, inline=' '.join(run_args[1:]),
+                                keep_tab=keep_tab, reuse_tab=reuse_tab))
+        elif len(run_args) == 1:
+            # passe run [-flags] script.passe  OR  passe run [-flags] -
+            asyncio.run(cmd_run(run_args[0],
+                                keep_tab=keep_tab, reuse_tab=reuse_tab))
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
