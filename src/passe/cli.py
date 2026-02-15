@@ -523,6 +523,9 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
+THIN_READ_THRESHOLD = 200  # chars — below this, emit diagnostic
+AUTH_PATTERNS = ('sign in', 'log in', 'login', 'access denied', 'forbidden', '403', 'unauthorized', '401')
+
 RAW_CONTENT_TYPES = frozenset({
     'application/json',
     'application/xml', 'text/xml',
@@ -563,10 +566,14 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
     html = await do_eval(client, SHADOW_FLATTEN_JS)
     meta_raw = await do_eval(
         client,
-        'JSON.stringify({textLength: document.body.innerText.length, url: window.location.href})'
+        'JSON.stringify({textLength: document.body.innerText.length,'
+        ' htmlLength: document.documentElement.outerHTML.length,'
+        ' title: document.title, url: window.location.href})'
     )
     meta = json.loads(meta_raw)
     page_text_length = meta.get('textLength', 0)
+    page_html_length = meta.get('htmlLength', 0)
+    page_title = meta.get('title', '')
     page_url = meta.get('url', '')
 
     markdown = None
@@ -718,6 +725,39 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             pct = round(ratio * 100, 1)
             warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{page_text_length} chars)'
 
+    # Thin-read diagnostics: flag suspiciously small extractions with possible cause
+    # Skip if extraction is a high proportion of a genuinely small page (not broken, just short)
+    thin_read = None
+    extraction_ratio = len(markdown) / page_text_length if page_text_length > 0 and markdown else 0
+    page_is_just_small = extraction_ratio >= 0.5 and page_text_length >= 100
+    if markdown is not None and len(markdown) < THIN_READ_THRESHOLD and not page_is_just_small:
+        word_count = len(markdown.split())
+        html_lower = html.lower() if html else ''
+        if any(p in html_lower for p in AUTH_PATTERNS) and 'type="password"' in html_lower:
+            cause = 'auth_wall'
+        elif page_text_length < 100:
+            cause = 'empty_page'
+        elif page_html_length > 10 * max(len(markdown), 1):
+            cause = 'js_hydration'
+        else:
+            cause = 'unknown'
+        thin_read = {
+            'word_count': word_count,
+            'extracted_chars': len(markdown),
+            'page_text_chars': page_text_length,
+            'html_chars': page_html_length,
+            'title': page_title,
+            'possible_cause': cause,
+        }
+        size_label = f'{page_html_length // 1024}KB' if page_html_length >= 1024 else f'{page_html_length}B'
+        thin_msg = f'thin-read: {word_count} words extracted from {size_label} page'
+        if page_title:
+            thin_msg += f' (title: "{page_title}")'
+        thin_msg += f' — possible {cause.replace("_", " ")}'
+        print(f'[read] {thin_msg}', file=sys.stderr)
+        if not warning:
+            warning = thin_msg
+
     if warning:
         print(f'[read] warning: {warning}', file=sys.stderr)
     print(f'[read] source: {source}', file=sys.stderr)
@@ -726,7 +766,10 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
         with open(path, 'w') as f:
             f.write(markdown)
 
-    return {'markdown': markdown, 'warning': warning, 'source': source}
+    result = {'markdown': markdown, 'warning': warning, 'source': source, 'title': page_title}
+    if thin_read:
+        result['thin_read'] = thin_read
+    return result
 
 
 async def do_fetch(client: CDPClient, url: str, path: str = None,
@@ -1026,6 +1069,10 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['source'] = read_result['source']
                 if read_result.get('content_type'):
                     step_info['content_type'] = read_result['content_type']
+                if read_result.get('thin_read'):
+                    step_info['thin_read'] = read_result['thin_read']
+                if read_result.get('title'):
+                    step_info['title'] = read_result['title']
             elif verb == 'fetch':
                 fetch_args = list(args)
                 force_source = None
@@ -1057,6 +1104,10 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['source'] = read_result['source']
                 if read_result.get('content_type'):
                     step_info['content_type'] = read_result['content_type']
+                if read_result.get('thin_read'):
+                    step_info['thin_read'] = read_result['thin_read']
+                if read_result.get('title'):
+                    step_info['title'] = read_result['title']
             elif verb == 'viewport':
                 await do_viewport(client, int(args[0]), int(args[1]))
             elif verb == 'wait':

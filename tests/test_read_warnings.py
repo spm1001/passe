@@ -277,13 +277,13 @@ async def test_borderline_ratio_no_warning():
     """Extraction at exactly 10% — no warning."""
     readability_data = json.dumps({
         'title': 'Just Enough',
-        'markdown': 'A' * 100,
-        'length': 100,
-        'pageTextLength': 1000,
+        'markdown': 'A' * 300,
+        'length': 300,
+        'pageTextLength': 3000,
     })
     client = _make_client(
         '<html></html>',
-        json.dumps({'textLength': 1000, 'url': 'http://example.com'}),
+        json.dumps({'textLength': 3000, 'url': 'http://example.com'}),
         readability_data,
     )
     mock_traf = _traf_module(return_value=None)
@@ -838,3 +838,151 @@ async def test_invalid_json_returned_as_is():
 
     assert result['source'] == 'raw'
     assert result['markdown'] == 'not valid json {{{'
+
+
+# ── Thin-read diagnostics ────────────────────────────────
+
+
+def _make_thin_client(html, meta_dict, *extra_values, content_type='text/html'):
+    """Mock client for thin-read tests.
+
+    Provides content_type, outerHTML, meta JSON, then any extra values
+    (e.g. Readability fallback response).
+    """
+    meta_json = json.dumps(meta_dict)
+    all_values = (content_type, html, meta_json, *extra_values)
+    client = AsyncMock()
+    client.send = AsyncMock(side_effect=[
+        {'result': {'result': {'value': v}}} for v in all_values
+    ])
+    return client
+
+
+@pytest.mark.asyncio
+async def test_thin_read_js_hydration(capsys):
+    """Large HTML but tiny extraction → JS hydration diagnosis."""
+    big_html = '<html><body>' + '<div>' * 500 + '</div>' * 500 + '</body></html>'
+    readability_data = json.dumps({
+        'title': 'SPA Page',
+        'markdown': 'Loading...',
+        'length': 10,
+        'pageTextLength': 500,
+    })
+    client = _make_thin_client(
+        big_html,
+        {'textLength': 500, 'htmlLength': len(big_html), 'title': 'SPA Page', 'url': 'http://example.com'},
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=None)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result.get('thin_read') is not None
+    assert result['thin_read']['possible_cause'] == 'js_hydration'
+    assert result['thin_read']['word_count'] == 1  # "Loading..."
+    assert result['thin_read']['title'] == 'SPA Page'
+    stderr = capsys.readouterr().err
+    assert 'thin-read' in stderr
+    assert 'js hydration' in stderr
+
+
+@pytest.mark.asyncio
+async def test_thin_read_auth_wall(capsys):
+    """HTML with login form + auth keywords → auth wall diagnosis."""
+    auth_html = '<html><body><form><input type="password"><p>Please log in</p></form></body></html>'
+    readability_data = json.dumps({
+        'title': 'Login Required',
+        'markdown': 'Please log in',
+        'length': 13,
+        'pageTextLength': 13,
+    })
+    client = _make_thin_client(
+        auth_html,
+        {'textLength': 13, 'htmlLength': len(auth_html), 'title': 'Login Required', 'url': 'http://example.com/secret'},
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=None)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['thin_read']['possible_cause'] == 'auth_wall'
+    stderr = capsys.readouterr().err
+    assert 'auth wall' in stderr
+
+
+@pytest.mark.asyncio
+async def test_thin_read_empty_page(capsys):
+    """Very little page text → empty page diagnosis."""
+    readability_data = json.dumps({
+        'title': 'Blank',
+        'markdown': '',
+        'length': 0,
+        'pageTextLength': 0,
+    })
+    client = _make_thin_client(
+        '<html><body></body></html>',
+        {'textLength': 20, 'htmlLength': 50, 'title': 'Blank', 'url': 'http://example.com/empty'},
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value=None)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['thin_read']['possible_cause'] == 'empty_page'
+
+
+@pytest.mark.asyncio
+async def test_no_thin_read_on_normal_extraction():
+    """Normal-sized extraction does NOT trigger thin-read."""
+    content = 'A' * 500
+    client = _make_client(
+        '<html><body><article>' + content + '</article></body></html>',
+        json.dumps({'textLength': 600, 'htmlLength': 2000, 'title': 'Article', 'url': 'http://example.com'}),
+        NO_STRUCTURE,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result.get('thin_read') is None
+    assert result['title'] == 'Article'
+
+
+@pytest.mark.asyncio
+async def test_no_thin_read_on_small_but_complete_page():
+    """Small page with high extraction ratio — like example.com — no thin-read."""
+    content = 'Example Domain. This domain is for use in illustrative examples in documents. ' \
+              'You may use this domain in examples without prior coordination.'  # 142 chars
+    client = _make_thin_client(
+        '<html><body>' + content + '</body></html>',
+        {'textLength': 180, 'htmlLength': 500, 'title': 'Example Domain', 'url': 'http://example.com'},
+        NO_STRUCTURE,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    # 142 chars < 200 threshold, but extraction ratio is ~79% and page_text >= 100
+    assert result.get('thin_read') is None
+
+
+@pytest.mark.asyncio
+async def test_thin_read_includes_title():
+    """Thin-read diagnostic includes page title."""
+    readability_data = json.dumps({
+        'title': 'Developer Reference',
+        'markdown': 'Error',
+        'length': 5,
+        'pageTextLength': 100,
+    })
+    client = _make_thin_client(
+        '<html><body><div>' + 'x' * 5000 + '</div></body></html>',
+        {'textLength': 100, 'htmlLength': 10000, 'title': 'Developer Reference', 'url': 'http://example.com'},
+        readability_data,
+    )
+    mock_traf = _traf_module(return_value='Error')
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['thin_read']['title'] == 'Developer Reference'
+    assert result['title'] == 'Developer Reference'
