@@ -899,6 +899,10 @@ KNOWN_VERBS = {
     'eval', 'eval-to', 'eval-file', 'eval-file-to', 'assert', 'log',
 }
 
+# Verbs that trigger auto-wait in the next read/fetch step.
+# Keep near KNOWN_VERBS so new navigation verbs don't get forgotten.
+NAV_VERBS = {'goto', 'back', 'forward'}
+
 
 async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> dict:
     """Execute parsed script steps. Returns summary dict."""
@@ -909,7 +913,6 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
     fail_verb = None
     fail_error = None
 
-    nav_verbs = {'goto', 'back', 'forward'}
     prev_verb = None
 
     for i, (verb, args) in enumerate(steps):
@@ -975,7 +978,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     else:
                         del read_args[idx]
                 # Auto-wait: if previous verb was navigation, wait for DOM stability
-                if not no_wait and prev_verb in nav_verbs:
+                if not no_wait and prev_verb in NAV_VERBS:
                     t_wait = time.monotonic()
                     stable = await do_wait_stable(client)
                     wait_ms = round((time.monotonic() - t_wait) * 1000, 1)
@@ -1165,15 +1168,18 @@ Usage:
   passe run -c 'goto URL; screenshot /tmp/out.png'   Inline script
   passe run script.passe                              Script file
   passe run - <<'EOF' ... EOF                         Stdin
+  passe run --keep-tab -c '...'                       Keep tab open after script
+  passe run --reuse-tab -c '...'                      Use existing visible tab
 
   passe screenshot <output.png>                       Screenshot current page
   passe eval <expression>                             Eval JS on current page
 
 DSL verbs:
-  goto, click, click-text, click-if, fill, type, select, press, hover,
-  scroll, screenshot, snapshot, read, viewport, wait, wait-for,
-  wait-navigation, back, forward, eval, eval-to, eval-file,
-  eval-file-to, assert, log
+  Navigation:   goto, back, forward, scroll
+  Interaction:  click, click-text, click-if, fill, type, select, press, hover
+  Observation:  screenshot, snapshot, read, fetch, eval, eval-to,
+                eval-file, eval-file-to
+  Control:      wait, wait-for, wait-navigation, viewport, assert, log
 
 Output: NDJSON per step on stderr, summary JSON on stdout.
 """
