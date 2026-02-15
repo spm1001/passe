@@ -206,6 +206,45 @@ EOF
 
 This replaces the painful minify → bash variable → unquoted heredoc dance.
 
+## Remote Chrome (cross-machine)
+
+When Chrome Debug runs on a different machine (e.g., Mac) and you're on Kube/remote:
+
+1. Set `PASSE_CDP=http://<host>:9222` — find the host via `tailscale status | grep macOS`
+2. Verify: `curl -s $PASSE_CDP/json/list` should show open tabs
+3. All passe commands respect `PASSE_CDP`
+
+**Common issue:** If passe attaches to `chrome://newtab-footer` or similar internal pages, close them first:
+````bash
+# List real tabs
+curl -s $PASSE_CDP/json/list | python3 -c "import json,sys; [print(f\"{t['title'][:50]} — {t['url'][:60]}\") for t in json.load(sys.stdin) if t['type']=='page']"
+
+# Close internal pages so real tab is first
+ID=$(curl -s $PASSE_CDP/json/list | python3 -c "import json,sys; [print(t['id']) for t in json.load(sys.stdin) if 'newtab' in t.get('url','')]" | head -1)
+curl -s "$PASSE_CDP/json/close/$ID"
+````
+
+## User handoff (login required)
+
+Passe creates and closes its own tab — the user never sees it. When you need the user to interact (e.g., log in):
+
+**Current workaround** (until `--keep-tab` and `--reuse-tab` land):
+````bash
+# Navigate the user's visible tab via raw CDP (no tab create/close)
+uv run --with websockets python3 -c "
+import asyncio, json, websockets
+async def nav():
+    ws = await websockets.connect('WS_URL_FROM_JSON_LIST')
+    await ws.send(json.dumps({'id':1,'method':'Page.navigate','params':{'url':'TARGET_URL'}}))
+    await ws.recv(); await ws.close()
+asyncio.run(nav())
+"
+# Then wait for user: "Log in and let me know when you're done"
+# Screenshot to verify: use the same websocket pattern with Page.captureScreenshot
+````
+
+**Future** (tracked in bon): `passe run --reuse-tab --keep-tab` will handle this natively.
+
 ## Anti-patterns
 
 - **`fill` vs `type`**: Default to `type` for SPAs. `fill` is for plain HTML forms only.

@@ -3,10 +3,12 @@
 > [!CAUTION]
 > Passe gives your AI agent **full control of a real Chrome browser** via the Chrome DevTools Protocol — including navigating to any URL, clicking, typing, reading page content, and executing JavaScript. Only use this if you understand and accept that your agent will have the same browser access as you do. There is no sandbox.
 
-> **Status:** Beta — actively developed
-> **Works with:** Claude Code, Amp, any agent with shell access
-> **Install:** `uv tool install passe`
-> **Requires:** Python 3.11+, Chrome/Chromium
+## Status
+
+**Robustness:** Beta — actively developed
+**Works with:** Claude Code, Amp, any agent with shell access
+**Install:** `uv tool install passe`
+**Requires:** Python 3.11+, Chrome/Chromium
 
 Fast browser automation for Claude Code. One WebSocket, one process, no daemon.
 
