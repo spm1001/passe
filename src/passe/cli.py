@@ -523,13 +523,41 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
     return text
 
 
+RAW_CONTENT_TYPES = frozenset({
+    'application/json',
+    'application/xml', 'text/xml',
+    'text/plain',
+    'text/csv',
+    'application/x-yaml', 'text/yaml',
+})
+
+
 async def do_read(client: CDPClient, path: str = None, force_source: str = None) -> dict:
     """Extract page content as markdown.
 
     Cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText.
-    force_source: 'trafilatura', 'readability', or 'innertext' — skip cascade, use only this.
+    force_source: 'trafilatura', 'readability', 'innertext', or 'raw' — skip cascade.
     Returns dict with 'markdown', optional 'warning', and 'source'.
     """
+    # Content-type sniffing: bypass extraction for structured data (JSON, XML, etc.)
+    content_type = await do_eval(client, 'document.contentType')
+    mime = (content_type or '').split(';')[0].strip().lower()
+
+    if force_source == 'raw' or (force_source is None and mime in RAW_CONTENT_TYPES):
+        raw_text = await do_eval(client, 'document.body.innerText')
+        # Pretty-print JSON
+        if 'json' in mime:
+            try:
+                raw_text = json.dumps(json.loads(raw_text), indent=2, ensure_ascii=False)
+            except (json.JSONDecodeError, TypeError):
+                pass  # Return as-is if not valid JSON
+        print(f'[read] content-type: {mime} — raw passthrough', file=sys.stderr)
+        print(f'[read] source: raw', file=sys.stderr)
+        if path:
+            with open(path, 'w') as f:
+                f.write(raw_text)
+        return {'markdown': raw_text, 'source': 'raw', 'content_type': mime}
+
     # Get page HTML (with shadow DOM flattened) and metadata from Chrome.
     from ._libs import SHADOW_FLATTEN_JS
     html = await do_eval(client, SHADOW_FLATTEN_JS)
@@ -996,6 +1024,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['warning'] = read_result['warning']
                 if read_result.get('source'):
                     step_info['source'] = read_result['source']
+                if read_result.get('content_type'):
+                    step_info['content_type'] = read_result['content_type']
             elif verb == 'fetch':
                 fetch_args = list(args)
                 force_source = None
@@ -1025,6 +1055,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['warning'] = read_result['warning']
                 if read_result.get('source'):
                     step_info['source'] = read_result['source']
+                if read_result.get('content_type'):
+                    step_info['content_type'] = read_result['content_type']
             elif verb == 'viewport':
                 await do_viewport(client, int(args[0]), int(args[1]))
             elif verb == 'wait':

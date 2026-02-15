@@ -18,16 +18,21 @@ import pytest
 from passe.cli import do_read
 
 
-def _make_client(*values):
+def _make_client(*values, content_type='text/html'):
     """Mock CDPClient where each send() returns a different value string.
 
-    do_read calls client.send (via do_eval) for outerHTML and metadata,
-    then optionally for the Readability fallback path. Each call returns
-    the next value from the sequence.
+    do_read calls client.send (via do_eval) for:
+      1. document.contentType (content-type sniffing)
+      2. outerHTML (shadow DOM flattened)
+      3. metadata JSON (textLength + url)
+      4+ optionally Readability fallback, DOM structure eval, etc.
+    Each call returns the next value from the sequence.
+    The content_type parameter is prepended automatically.
     """
+    all_values = (content_type, *values)
     client = AsyncMock()
     client.send = AsyncMock(side_effect=[
-        {'result': {'result': {'value': v}}} for v in values
+        {'result': {'result': {'value': v}}} for v in all_values
     ])
     return client
 
@@ -527,7 +532,7 @@ async def test_quality_gate_no_dom_eval_when_output_rich():
 
     assert result['source'] == 'trafilatura'
     # Only 2 calls: outerHTML + meta. No DOM signal eval.
-    assert client.send.call_count == 2
+    assert client.send.call_count == 3  # content-type + outerHTML + meta
 
 
 @pytest.mark.asyncio
@@ -636,7 +641,7 @@ async def test_force_source_trafilatura():
     assert result['source'] == 'trafilatura'
     assert result['markdown'] == '# Forced trafilatura'
     # Only 2 send calls (outerHTML + meta), no Readability or DOM eval
-    assert client.send.call_count == 2
+    assert client.send.call_count == 3  # content-type + outerHTML + meta
 
 
 @pytest.mark.asyncio
@@ -683,3 +688,153 @@ async def test_force_source_unknown(capsys):
     assert result['markdown'] == ''
     stderr = capsys.readouterr().err
     assert 'Unknown source' in stderr
+
+
+# ── Content-type sniffing: raw passthrough ────────────────
+
+
+def _make_raw_client(content_type, body_text):
+    """Mock client for content-type sniffing tests.
+
+    Returns content_type for document.contentType, then body_text for innerText.
+    """
+    client = AsyncMock()
+    client.send = AsyncMock(side_effect=[
+        {'result': {'result': {'value': content_type}}},
+        {'result': {'result': {'value': body_text}}},
+    ])
+    return client
+
+
+@pytest.mark.asyncio
+async def test_json_content_type_raw_passthrough():
+    """application/json triggers raw passthrough with pretty-printing."""
+    raw_json = '{"name":"test","value":42}'
+    client = _make_raw_client('application/json', raw_json)
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'application/json'
+    # Should be pretty-printed
+    parsed = json.loads(result['markdown'])
+    assert parsed == {'name': 'test', 'value': 42}
+    assert '\n' in result['markdown']  # indented
+
+
+@pytest.mark.asyncio
+async def test_plain_text_raw_passthrough():
+    """text/plain triggers raw passthrough, no transformation."""
+    text = 'Just some plain text\nwith newlines.'
+    client = _make_raw_client('text/plain', text)
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'text/plain'
+    assert result['markdown'] == text
+
+
+@pytest.mark.asyncio
+async def test_xml_content_type_raw_passthrough():
+    """text/xml triggers raw passthrough."""
+    xml = '<root><item>hello</item></root>'
+    client = _make_raw_client('text/xml', xml)
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'text/xml'
+    assert result['markdown'] == xml
+
+
+@pytest.mark.asyncio
+async def test_csv_content_type_raw_passthrough():
+    """text/csv triggers raw passthrough."""
+    csv_data = 'name,value\nfoo,1\nbar,2'
+    client = _make_raw_client('text/csv', csv_data)
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'text/csv'
+    assert result['markdown'] == csv_data
+
+
+@pytest.mark.asyncio
+async def test_content_type_with_charset_still_matches():
+    """Content-type with ;charset=utf-8 suffix still triggers raw."""
+    client = AsyncMock()
+    client.send = AsyncMock(side_effect=[
+        {'result': {'result': {'value': 'application/json; charset=utf-8'}}},
+        {'result': {'result': {'value': '{"ok": true}'}}},
+    ])
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'application/json'
+
+
+@pytest.mark.asyncio
+async def test_html_content_type_uses_cascade():
+    """text/html does NOT trigger raw passthrough — uses extraction cascade."""
+    content = 'A' * 500
+    client = _make_client(
+        '<html><body>' + content + '</body></html>',
+        json.dumps({'textLength': 600, 'url': 'http://example.com'}),
+        NO_STRUCTURE,
+    )
+    mock_traf = _traf_module(return_value=content)
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client)
+
+    assert result['source'] == 'trafilatura'
+    assert 'content_type' not in result
+
+
+@pytest.mark.asyncio
+async def test_force_source_raw_overrides_html():
+    """--source raw forces raw passthrough even on text/html."""
+    body_text = '<h1>Hello</h1><p>World</p>'
+    client = _make_raw_client('text/html', body_text)
+    result = await do_read(client, force_source='raw')
+
+    assert result['source'] == 'raw'
+    assert result['content_type'] == 'text/html'
+    assert result['markdown'] == body_text
+
+
+@pytest.mark.asyncio
+async def test_force_source_trafilatura_overrides_json():
+    """--source trafilatura on a JSON page skips raw, uses trafilatura."""
+    client = _make_client(
+        '<html><body>{"data": true}</body></html>',
+        json.dumps({'textLength': 100, 'url': 'http://example.com/api'}),
+        content_type='application/json',
+    )
+    mock_traf = _traf_module(return_value='extracted content')
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client, force_source='trafilatura')
+
+    assert result['source'] == 'trafilatura'
+
+
+@pytest.mark.asyncio
+async def test_json_raw_passthrough_writes_file(tmp_path):
+    """Raw JSON passthrough writes pretty-printed content to file."""
+    raw_json = '{"items":[1,2,3]}'
+    client = _make_raw_client('application/json', raw_json)
+    outfile = str(tmp_path / 'out.json')
+    result = await do_read(client, path=outfile)
+
+    assert result['source'] == 'raw'
+    with open(outfile) as f:
+        written = f.read()
+    assert json.loads(written) == {'items': [1, 2, 3]}
+    assert '\n' in written
+
+
+@pytest.mark.asyncio
+async def test_invalid_json_returned_as_is():
+    """If body claims JSON but isn't valid, return raw text without crashing."""
+    client = _make_raw_client('application/json', 'not valid json {{{')
+    result = await do_read(client)
+
+    assert result['source'] == 'raw'
+    assert result['markdown'] == 'not valid json {{{'

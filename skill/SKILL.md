@@ -76,7 +76,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [path]` — full-page PNG (capped at 16384px). `--viewport` for viewport-only.
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [--source extractor] [--no-wait] [path]` — extract page as markdown. Three-stage cascade: trafilatura → Readability.js+Turndown → innerText. Use `--source` to bypass cascade. **Auto-waits for DOM stability** when previous verb was navigation (`goto`/`back`/`forward`) — no explicit `wait` needed. Use `--no-wait` to skip.
+- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
 - `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Reports `file`, `final_url`, `source` in step output. Prefer this over `goto; wait; read`.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
@@ -245,7 +245,7 @@ asyncio.run(nav())
 # Screenshot to verify: use the same websocket pattern with Page.captureScreenshot
 ````
 
-**Future** (tracked in bon): `passe run --reuse-tab --keep-tab` will handle this natively.
+Use `passe run --reuse-tab -c 'goto <oauth-url>'` to navigate the user's visible tab, then `passe run --reuse-tab -c 'eval document.body.innerText'` to capture the result after approval. `--reuse-tab` implies `--keep-tab`.
 
 ## Anti-patterns
 
@@ -257,7 +257,7 @@ asyncio.run(nav())
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
-- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). Use `wait-for <selector>` with a specific element, or omit the wait entirely on server-rendered pages — most complete in <300ms. Only add `wait` for known-slow SPAs with measured timing.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). Only use explicit `wait` or `wait-for` for SPAs where you need a specific element to appear after a click.
 
 ## Atomic commands
 
