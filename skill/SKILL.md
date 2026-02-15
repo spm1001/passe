@@ -76,7 +76,8 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [path]` — full-page PNG (capped at 16384px). `--viewport` for viewport-only.
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [--source extractor] [path]` — extract page as markdown. Three-stage cascade: trafilatura → Readability.js+Turndown → innerText. Use `--source trafilatura`, `--source readability`, or `--source innertext` to bypass cascade. Shadow DOM flattened before extraction. See Content Extraction below.
+- `read [--source extractor] [--no-wait] [path]` — extract page as markdown. Three-stage cascade: trafilatura → Readability.js+Turndown → innerText. Use `--source` to bypass cascade. **Auto-waits for DOM stability** when previous verb was navigation (`goto`/`back`/`forward`) — no explicit `wait` needed. Use `--no-wait` to skip.
+- `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Reports `file`, `final_url`, `source` in step output. Prefer this over `goto; wait; read`.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.

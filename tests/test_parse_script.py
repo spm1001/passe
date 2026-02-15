@@ -412,6 +412,26 @@ class TestEdgeCases:
         result = parse_script("read /tmp/article.md")
         assert result == [("read", ["/tmp/article.md"])]
 
+    def test_read_no_wait_flag(self):
+        result = parse_script("read --no-wait /tmp/article.md")
+        assert result == [("read", ["--no-wait", "/tmp/article.md"])]
+
+    def test_read_no_wait_with_source(self):
+        result = parse_script("read --no-wait --source trafilatura /tmp/out.md")
+        assert result == [("read", ["--no-wait", "--source", "trafilatura", "/tmp/out.md"])]
+
+    def test_fetch_url_and_path(self):
+        result = parse_script("fetch https://example.com /tmp/out.md")
+        assert result == [("fetch", ["https://example.com", "/tmp/out.md"])]
+
+    def test_fetch_url_only(self):
+        result = parse_script("fetch https://example.com")
+        assert result == [("fetch", ["https://example.com"])]
+
+    def test_fetch_with_source(self):
+        result = parse_script("fetch --source readability https://example.com /tmp/out.md")
+        assert result == [("fetch", ["--source", "readability", "https://example.com", "/tmp/out.md"])]
+
     def test_read_no_path(self):
         result = parse_script("read")
         assert result == [("read", [])]

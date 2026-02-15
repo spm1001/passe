@@ -683,6 +683,30 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
     return {'markdown': markdown, 'warning': warning, 'source': source}
 
 
+async def do_fetch(client: CDPClient, url: str, path: str = None,
+                   force_source: str = None) -> dict:
+    """Compound verb: goto + auto-wait + read in one step.
+    Returns read result dict with added nav_ms, wait_ms, read_ms, timed_out."""
+    t0 = time.monotonic()
+    await do_navigate(client, url)
+    nav_ms = round((time.monotonic() - t0) * 1000, 1)
+
+    t1 = time.monotonic()
+    stable = await do_wait_stable(client)
+    wait_ms = round((time.monotonic() - t1) * 1000, 1)
+
+    t2 = time.monotonic()
+    result = await do_read(client, path, force_source=force_source)
+    read_ms = round((time.monotonic() - t2) * 1000, 1)
+
+    result['nav_ms'] = nav_ms
+    result['wait_ms'] = wait_ms
+    result['read_ms'] = read_ms
+    if not stable:
+        result['timed_out'] = True
+    return result
+
+
 async def do_viewport(client: CDPClient, width: int, height: int):
     await client.send('Emulation.setDeviceMetricsOverride', {
         'width': width, 'height': height,
@@ -707,6 +731,35 @@ async def do_wait_for(client: CDPClient, selector: str, timeout_ms: int = 10000)
 async def do_wait_navigation(client: CDPClient):
     await client.send('Page.enable')
     await client.wait_for_event('Page.loadEventFired', timeout=15.0)
+
+
+async def do_wait_stable(client: CDPClient, timeout_ms: int = 2000) -> bool:
+    """Wait for DOM stability before extraction. Returns True if stable, False if timed out.
+
+    Dual-signal polling: element count (structure) + text length (content).
+    Both must be unchanged across two polls 100ms apart to declare stability.
+    Catches both structural changes (new elements appearing) and content-only
+    changes (text filling existing empty elements during hydration).
+    """
+    probe_js = ('JSON.stringify([document.getElementsByTagName("*").length,'
+                'document.body.textContent.length])')
+    prev = None
+    deadline = time.monotonic() + timeout_ms / 1000
+    while time.monotonic() < deadline:
+        try:
+            raw = await do_eval(client, probe_js)
+            cur = json.loads(raw)
+        except (ValueError, RuntimeError):
+            cur = None
+        if prev is not None and cur == prev:
+            return True
+        prev = cur
+        await asyncio.sleep(0.1)
+    print(
+        f'[read] auto-wait: timed out after {timeout_ms}ms'
+        ' (page may have continuous mutations)', file=sys.stderr
+    )
+    return False
 
 
 async def do_eval(client: CDPClient, expression: str) -> str:
@@ -823,8 +876,8 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
-    'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'viewport',
-    'wait', 'wait-for', 'wait-navigation', 'back', 'forward',
+    'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
+    'viewport', 'wait', 'wait-for', 'wait-navigation', 'back', 'forward',
     'eval', 'eval-to', 'eval-file', 'eval-file-to', 'assert', 'log',
 }
 
@@ -837,6 +890,9 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
     failed_at = None
     fail_verb = None
     fail_error = None
+
+    nav_verbs = {'goto', 'back', 'forward'}
+    prev_verb = None
 
     for i, (verb, args) in enumerate(steps):
         if verb not in KNOWN_VERBS:
@@ -890,6 +946,9 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'read':
                 read_args = list(args)
                 force_source = None
+                no_wait = '--no-wait' in read_args
+                if no_wait:
+                    read_args.remove('--no-wait')
                 if '--source' in read_args:
                     idx = read_args.index('--source')
                     if idx + 1 < len(read_args):
@@ -897,12 +956,50 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                         del read_args[idx:idx + 2]
                     else:
                         del read_args[idx]
+                # Auto-wait: if previous verb was navigation, wait for DOM stability
+                if not no_wait and prev_verb in nav_verbs:
+                    t_wait = time.monotonic()
+                    stable = await do_wait_stable(client)
+                    wait_ms = round((time.monotonic() - t_wait) * 1000, 1)
+                    step_info['auto_wait_ms'] = wait_ms
+                    if not stable:
+                        step_info['auto_wait_timed_out'] = True
+                    print(f'[read] auto-wait: {wait_ms}ms', file=sys.stderr)
                 path = read_args[0] if read_args else None
                 read_result = await do_read(client, path, force_source=force_source)
                 if path:
                     files.append(path)
                 else:
                     step_info['result'] = read_result['markdown'][:200]
+                if read_result.get('warning'):
+                    step_info['warning'] = read_result['warning']
+                if read_result.get('source'):
+                    step_info['source'] = read_result['source']
+            elif verb == 'fetch':
+                fetch_args = list(args)
+                force_source = None
+                if '--source' in fetch_args:
+                    idx = fetch_args.index('--source')
+                    if idx + 1 < len(fetch_args):
+                        force_source = fetch_args[idx + 1]
+                        del fetch_args[idx:idx + 2]
+                    else:
+                        del fetch_args[idx]
+                url = fetch_args[0]
+                path = fetch_args[1] if len(fetch_args) > 1 else None
+                if path is None:
+                    import tempfile
+                    fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
+                    os.close(fd)
+                read_result = await do_fetch(client, url, path, force_source=force_source)
+                files.append(path)
+                step_info['file'] = path
+                step_info['final_url'] = await do_eval(client, 'window.location.href')
+                step_info['nav_ms'] = read_result.get('nav_ms')
+                step_info['wait_ms'] = read_result.get('wait_ms')
+                step_info['read_ms'] = read_result.get('read_ms')
+                if read_result.get('timed_out'):
+                    step_info['auto_wait_timed_out'] = True
                 if read_result.get('warning'):
                     step_info['warning'] = read_result['warning']
                 if read_result.get('source'):
@@ -938,6 +1035,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 print(f'[log] {args[0]}', file=sys.stderr)
 
             step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
+            prev_verb = verb
 
         except Exception as e:
             step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
