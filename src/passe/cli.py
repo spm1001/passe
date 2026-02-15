@@ -725,8 +725,11 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             pct = round(ratio * 100, 1)
             warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{page_text_length} chars)'
 
-    # Thin-read diagnostics: flag suspiciously small extractions with possible cause
-    # Skip if extraction is a high proportion of a genuinely small page (not broken, just short)
+    # Thin-read diagnostics: flag suspiciously small extractions with possible cause.
+    # Exemption: if the page itself is small but extraction captured most of it, it's not
+    # broken — just short (e.g. example.com: 113 chars extracted / 129 page text = 87%).
+    # Thresholds: ratio ≥ 0.5 ensures we got at least half the content, text ≥ 100 avoids
+    # exempting auth walls where both page text and extraction are tiny (e.g. "Please log in").
     thin_read = None
     extraction_ratio = len(markdown) / page_text_length if page_text_length > 0 and markdown else 0
     page_is_just_small = extraction_ratio >= 0.5 and page_text_length >= 100

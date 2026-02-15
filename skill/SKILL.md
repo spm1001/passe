@@ -76,7 +76,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [path]` — full-page PNG (capped at 16384px). `--viewport` for viewport-only.
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
+- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
 - `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Reports `file`, `final_url`, `source` in step output. Prefer this over `goto; wait; read`.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
