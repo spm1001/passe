@@ -1,10 +1,10 @@
 ---
 name: passe
 description: >
-  Orchestrates fast CDP browser automation via line DSL. Invoke BEFORE any `passe`
-  command — provides verb vocabulary, scout-then-act pattern, and invocation conventions
-  that prevent malformed scripts and wasted round-trips. Triggers on 'passe run',
-  'automate the browser', 'screenshot a page', 'interact with a website',
+  Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE any
+  `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
+  conventions that prevent malformed scripts and wasted round-trips. Triggers on
+  'passe run', 'automate the browser', 'screenshot a page', 'interact with a website',
   'click a button on', 'fill a form on', 'scrape this page', 'test this page'.
   For clean article/blog extraction use mise fetch; for DOM-faithful extraction
   (tables, code blocks, technical docs) use passe read. (user)
@@ -106,6 +106,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 | **Animated/dynamic content** | Massive garbage | Use `eval` with `innerText` |
 | **Large data tables** | Quality gate auto-detects loss, falls to Readability | Rarely needed now; `eval` as escape hatch |
 | **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `read` |
+| **JSON/XML/structured data** | Mangled prose extraction | Use `curl` or `eval-to` — trafilatura treats structured data as text |
 
 **Decision tree:**
 
@@ -255,6 +256,7 @@ asyncio.run(nav())
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). Use `wait-for <selector>` with a specific element, or omit the wait entirely on server-rendered pages — most complete in <300ms. Only add `wait` for known-slow SPAs with measured timing.
 
 ## Atomic commands
 
