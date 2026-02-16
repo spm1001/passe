@@ -1,6 +1,8 @@
 # Browser Automation Landscape
 
-A reference for developers comparing browser automation tools in the age of AI agents. Last updated: February 2026.
+Companion to [passe](https://github.com/spm1001/passe) — a fast, scripted browser automation CLI for AI agents. This document maps the broader landscape of browser automation tools so you can see where passe fits and when to reach for something else.
+
+Last updated: February 2026.
 
 ## The framework
 
