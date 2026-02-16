@@ -34,7 +34,14 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 
 ## Chrome connection
 
-Passe connects to Chrome on port 9222. If the user's daily driver Chrome runs with `--remote-debugging-port=9222`, passe gets full auth state. If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-debug` — a bare profile with no auth. Never assume auth unless confirmed.
+Passe connects to Chrome on port 9222. Two modes:
+
+| Machine | Chrome | Auth state | Use for |
+|---------|--------|-----------|---------|
+| **Mac** (daily driver) | Chrome Debug with `--remote-debugging-port=9222` | Full cookies, SSO | Authenticated browsing, OAuth flows |
+| **Kube/remote** | Headless Chromium (systemd) on `localhost:9222` | Bare profile | Dev testing, screenshots, device emulation |
+
+Use `--cdp http://host:9222` to target a specific Chrome instance per-invocation (overrides `PASSE_CDP` env var). Default: localhost:9222.
 
 ## Invocation
 
@@ -55,6 +62,11 @@ EOF
 
 # Reusable: .passe files
 passe run tests/checkout.passe
+
+# Global flags (apply to any subcommand):
+passe --cdp http://host:9222 run -c '...'              # Target specific Chrome
+passe --device "iPhone 14 Pro" run -c '...'             # Device emulation preset
+passe --device "iPhone 14 Pro" --dpr 1 run -c '...'     # 1x DPR (smaller screenshots)
 ```
 
 Never generate long inline one-liners. Use heredoc for 5+ verbs.
@@ -74,7 +86,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `hover <selector>` — mouseover
 
 **Observation:**
-- `screenshot [path]` — full-page PNG (capped at 16384px). `--viewport` for viewport-only.
+- `screenshot [--fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
 - `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
 - `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Reports `file`, `final_url`, `source` in step output. Prefer this over `goto; wait; read`.
@@ -83,9 +95,13 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
 - `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
+**Emulation:**
+- `device <"name"> [--dpr N]` — apply device emulation preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` overrides DPR for smaller screenshots.
+- `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
+
 **Control:**
 - `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-navigation`
-- `viewport <width> <height>` — for responsive testing
+- `watch [--fast] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Debounces 100ms, screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
 - `assert <expression>` — fail script if falsy. Sub-millisecond.
 - `log <message>` — print to stderr
 
@@ -107,7 +123,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 | **Animated/dynamic content** | Massive garbage | Use `eval` with `innerText` |
 | **Large data tables** | Quality gate auto-detects loss, falls to Readability | Rarely needed now; `eval` as escape hatch |
 | **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `read` |
-| **JSON/XML/structured data** | Mangled prose extraction | Use `curl` or `eval-to` — trafilatura treats structured data as text |
+| **JSON/XML/structured data** | Raw passthrough (auto-detected) | Content-type sniffing handles this automatically (`source: raw`) |
 
 **Decision tree:**
 
@@ -228,24 +244,17 @@ curl -s "$PASSE_CDP/json/close/$ID"
 
 ## User handoff (login required)
 
-Passe creates and closes its own tab — the user never sees it. When you need the user to interact (e.g., log in):
+Passe creates and closes its own tab — the user never sees it. When you need the user to interact (e.g., log in), use `--reuse-tab` and `--keep-tab`:
 
-**Current workaround** (until `--keep-tab` and `--reuse-tab` land):
-````bash
-# Navigate the user's visible tab via raw CDP (no tab create/close)
-uv run --with websockets python3 -c "
-import asyncio, json, websockets
-async def nav():
-    ws = await websockets.connect('WS_URL_FROM_JSON_LIST')
-    await ws.send(json.dumps({'id':1,'method':'Page.navigate','params':{'url':'TARGET_URL'}}))
-    await ws.recv(); await ws.close()
-asyncio.run(nav())
-"
-# Then wait for user: "Log in and let me know when you're done"
-# Screenshot to verify: use the same websocket pattern with Page.captureScreenshot
-````
+```bash
+# Navigate the user's visible tab
+passe run --reuse-tab -c 'goto https://accounts.google.com/oauth/...'
+# Ask user: "Log in and let me know when you're done"
+# Then capture the result
+passe run --reuse-tab -c 'eval document.body.innerText'
+```
 
-Use `passe run --reuse-tab -c 'goto <oauth-url>'` to navigate the user's visible tab, then `passe run --reuse-tab -c 'eval document.body.innerText'` to capture the result after approval. `--reuse-tab` implies `--keep-tab`.
+`--reuse-tab` attaches to the first non-chrome:// tab. `--keep-tab` prevents passe from closing the tab on exit. `--reuse-tab` implies `--keep-tab`.
 
 ## Anti-patterns
 
@@ -258,6 +267,7 @@ Use `passe run --reuse-tab -c 'goto <oauth-url>'` to navigate the user's visible
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
 - **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). Only use explicit `wait` or `wait-for` for SPAs where you need a specific element to appear after a click.
+- **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
 ## Atomic commands
 
@@ -268,11 +278,31 @@ passe screenshot /tmp/current.png    # Screenshot whatever's loaded
 passe eval "document.title"          # Quick JS eval
 ```
 
+## Mobile UI development loop
+
+Device emulation + fast screenshots + watch verb = Claude sees mobile UI without a human.
+
+```bash
+# One-shot: screenshot a page as iPhone
+passe --cdp http://localhost:9222 --device "iPhone 14 Pro" --dpr 1 \
+  run -c 'goto http://localhost:5173; screenshot --fast /tmp/mobile.jpg'
+
+# Continuous: auto-screenshot on every Vite HMR update
+passe --cdp http://localhost:9222 --device "iPhone 14 Pro" --dpr 1 \
+  run -c 'goto http://localhost:5173; watch --fast /tmp/mobile.jpg'
+```
+
+The `watch` verb runs in the background. Start it with `Bash run_in_background`, then read `/tmp/mobile.jpg` after each edit. Use `TaskStop` to kill it when done.
+
+**Available device presets:** iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p.
+
+**Fidelity caveat:** This is Chrome's Blink pretending to be Safari's WebKit. Layout, spacing, and components are pixel-close. Safari-specific bugs (`-webkit-` scroll, rubber-band, backdrop-filter) need the real device.
+
 ## Development
 
 ```bash
 # After editing passe source:
-uv tool install /Users/modha/Repos/passe --force --reinstall
+uv tool install ~/Repos/passe --force --reinstall
 
 # Run tests:
 uv run --with pytest pytest tests/ -v

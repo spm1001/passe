@@ -677,6 +677,47 @@ async def test_force_source_innertext():
 
 
 @pytest.mark.asyncio
+async def test_force_source_trafilatura_thin_read(capsys):
+    """--source trafilatura emits thin-read diagnostic and includes title."""
+    client = _make_client(
+        '<html><body><div>' + 'x' * 5000 + '</div></body></html>',
+        json.dumps({'textLength': 500, 'htmlLength': 10000,
+                    'title': 'Developer Reference', 'url': 'http://example.com'}),
+    )
+    mock_traf = _traf_module(return_value='tiny')
+    with patch.dict(sys.modules, {'trafilatura': mock_traf}):
+        result = await do_read(client, force_source='trafilatura')
+
+    assert result['source'] == 'trafilatura'
+    assert result['title'] == 'Developer Reference'
+    assert result.get('thin_read') is not None
+    assert result['thin_read']['possible_cause'] == 'js_hydration'
+    assert result['thin_read']['title'] == 'Developer Reference'
+    assert 'thin-read' in result.get('warning', '')
+    stderr = capsys.readouterr().err
+    assert 'thin-read' in stderr
+
+
+@pytest.mark.asyncio
+async def test_force_source_readability_includes_title():
+    """--source readability includes title in return dict."""
+    readability_data = json.dumps({
+        'title': 'Test Page', 'markdown': '# Big Content\n' + 'A' * 500,
+        'pageTextLength': 600,
+    })
+    client = _make_client(
+        '<html><body>hello</body></html>',
+        json.dumps({'textLength': 600, 'htmlLength': 2000,
+                    'title': 'Test Page', 'url': 'http://example.com'}),
+        readability_data,
+    )
+    result = await do_read(client, force_source='readability')
+
+    assert result['source'] == 'readability'
+    assert result['title'] == 'Test Page'
+
+
+@pytest.mark.asyncio
 async def test_force_source_unknown(capsys):
     """--source bogus warns about unknown source."""
     client = _make_client(

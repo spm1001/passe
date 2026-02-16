@@ -69,6 +69,11 @@ passe run tests/checkout-flow.passe
 
 **Never generate 120-token inline one-liners.** Use heredoc for 5+ verbs.
 
+**Global flags** (apply to any subcommand):
+- `--cdp <url>` — CDP endpoint (overrides `PASSE_CDP` env, default `http://localhost:9222`)
+- `--device <name>` — device emulation preset applied before script
+- `--dpr <n>` — override device pixel ratio (e.g. `1` for smaller screenshots)
+
 ### Verb reference
 
 **Navigation:**
@@ -87,7 +92,7 @@ passe run tests/checkout-flow.passe
 - `hover <selector>` — mouseover event
 
 **Observation:**
-- `screenshot [path]` — full-page PNG (entire scrollable document, not just viewport). Use `--viewport` for viewport-only.
+- `screenshot [--fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. `--fast` = JPEG q70 + optimizeForSpeed + viewport-only (2-4x faster, 3-6x smaller). Returns timing `breakdown` in step NDJSON.
 - `snapshot [path]` — list interactive elements with CSS selectors. For element discovery.
 - `read [--source extractor] [--no-wait] [path]` — extract page content as markdown. **Content-type sniffing**: if the page's MIME type is structured data (application/json, text/xml, text/plain, text/csv, etc.), bypasses extraction and returns raw content (JSON is pretty-printed). Reports `source: raw` and `content_type` in step output. For HTML pages, uses the extraction cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText. Use `--source trafilatura`, `--source readability`, `--source innertext`, or `--source raw` to force a specific extractor. Logs `source` in step output. **Auto-waits for DOM stability** when the previous verb was a navigation (`goto`, `back`, `forward`) — no explicit `wait` needed. Use `--no-wait` to skip auto-wait.
 - `fetch <url> [--source extractor] [path]` — compound verb: `goto` + auto-wait + `read` in one step. The default for research/extraction workflows. Path optional — if omitted, writes to a temp file and reports the path in step output. Passes through `--source` flag to the read cascade.
@@ -96,11 +101,15 @@ passe run tests/checkout-flow.passe
 - `eval-file <js-path>` — read JS from a file and evaluate. Use for multi-line JS — avoids minification.
 - `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
+**Emulation:**
+- `device <"name"> [--dpr N]` — apply device preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` for smaller screenshots.
+- `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
+
 **Control:**
 - `wait <ms>` — sleep
 - `wait-for <selector> [timeout_ms]` — wait until selector matches visible element. Default 10s. **Critical for SPAs.**
 - `wait-navigation` — wait for page load event
-- `viewport <width> <height>` — set viewport size (for responsive testing)
+- `watch [--fast] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Debounces 100ms, screenshots to path. Runs until killed. Use with `Bash run_in_background`.
 - `assert <expression>` — eval JS, fail script if falsy. Error shows actual value.
 - `log <message>` — print to stderr
 
