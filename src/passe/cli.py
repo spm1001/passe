@@ -37,6 +37,7 @@ class CDPClient:
         self.pending: dict[int, asyncio.Future] = {}
         self.event_waiters: dict[str, asyncio.Future] = {}
         self.event_buffer: dict[str, dict] = {}
+        self.event_queues: dict[str, asyncio.Queue] = {}  # continuous event streams
         self.session_id: str | None = None
         self.receiver_task: asyncio.Task | None = None
         self._target_id: str | None = None
@@ -69,6 +70,10 @@ class CDPClient:
                     if not fut.done():
                         fut.set_result(msg)
                         continue
+                # Continuous event queue (for watch verb etc.)
+                if method in self.event_queues:
+                    self.event_queues[method].put_nowait(msg)
+                    continue
                 # No active waiter (or waiter was stale/timed-out) — buffer if whitelisted
                 if method in self.BUFFERED_EVENTS:
                     self.event_buffer[method] = msg
@@ -94,6 +99,16 @@ class CDPClient:
         fut = asyncio.get_event_loop().create_future()
         self.event_waiters[method] = fut
         return await asyncio.wait_for(fut, timeout=timeout)
+
+    def subscribe(self, method: str) -> asyncio.Queue:
+        """Subscribe to continuous events. Returns an asyncio.Queue."""
+        q = asyncio.Queue()
+        self.event_queues[method] = q
+        return q
+
+    def unsubscribe(self, method: str):
+        """Stop receiving continuous events."""
+        self.event_queues.pop(method, None)
 
     async def attach_to_first_page(self) -> str:
         """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
@@ -156,9 +171,12 @@ class CDPClient:
             self._owns_tab = False
 
 
+_cdp_override: str | None = None
+
+
 def _cdp_base_url():
-    """Get CDP base URL from PASSE_CDP env var or default to localhost:9222."""
-    return os.environ.get('PASSE_CDP', 'http://localhost:9222')
+    """Get CDP base URL from --cdp flag, PASSE_CDP env var, or default to localhost:9222."""
+    return _cdp_override or os.environ.get('PASSE_CDP', 'http://localhost:9222')
 
 
 def _chrome_running() -> bool:
@@ -429,12 +447,20 @@ async def do_scroll(client: CDPClient, x: int, y: int):
 
 
 async def do_screenshot(client: CDPClient, path: str = None,
-                        full_page: bool = True, viewport_only: bool = False) -> dict:
-    """Capture screenshot. Returns dict with path and size info."""
+                        full_page: bool = True, viewport_only: bool = False,
+                        fmt: str = 'png', quality: int = None,
+                        optimize_speed: bool = False) -> dict:
+    """Capture screenshot. Returns dict with path, size, and timing breakdown."""
     if viewport_only:
         full_page = False
 
-    params = {'format': 'png'}
+    params = {'format': fmt if fmt != 'jpg' else 'jpeg'}
+    if fmt in ('jpeg', 'jpg', 'webp') and quality is not None:
+        params['quality'] = quality
+    if optimize_speed:
+        params['optimizeForSpeed'] = True
+
+    t0 = time.monotonic()
     if full_page:
         # Get full page dimensions
         metrics = await client.send('Runtime.evaluate', {
@@ -450,14 +476,28 @@ async def do_screenshot(client: CDPClient, path: str = None,
         params['captureBeyondViewport'] = True
 
     result = await client.send('Page.captureScreenshot', params)
-    data = base64.b64decode(result['result']['data'])
+    capture_ms = round((time.monotonic() - t0) * 1000, 1)
 
+    t1 = time.monotonic()
+    data = base64.b64decode(result['result']['data'])
+    decode_ms = round((time.monotonic() - t1) * 1000, 1)
+
+    ext = fmt if fmt not in ('jpeg',) else 'jpg'
     if path is None:
-        path = f'/tmp/passe-{int(time.time())}.png'
+        path = f'/tmp/passe-{int(time.time())}.{ext}'
+    t2 = time.monotonic()
     with open(path, 'wb') as f:
         f.write(data)
+    write_ms = round((time.monotonic() - t2) * 1000, 1)
 
-    return {'file': path, 'kb': round(len(data) / 1024, 1)}
+    return {
+        'file': path, 'kb': round(len(data) / 1024, 1),
+        'format': params['format'],
+        'breakdown': {
+            'capture_ms': capture_ms, 'decode_ms': decode_ms,
+            'write_ms': write_ms, 'bytes': len(data),
+        },
+    }
 
 
 async def do_snapshot(client: CDPClient, path: str = None) -> str:
@@ -525,6 +565,49 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
 
 THIN_READ_THRESHOLD = 200  # chars — below this, emit diagnostic
 AUTH_PATTERNS = ('sign in', 'log in', 'login', 'access denied', 'forbidden', '403', 'unauthorized', '401')
+
+
+def _check_thin_read(markdown: str, html: str, page_text_length: int,
+                     page_html_length: int, page_title: str) -> dict | None:
+    """Check for suspiciously small extraction. Returns thin_read dict or None.
+
+    Shared between forced-source and cascade paths so both emit diagnostics.
+    Exempts legitimately small pages (high extraction ratio with real content).
+    """
+    if markdown is None:
+        return None
+    extraction_ratio = len(markdown) / page_text_length if page_text_length > 0 else 0
+    page_is_just_small = extraction_ratio >= 0.5 and page_text_length >= 100
+    if len(markdown) >= THIN_READ_THRESHOLD or page_is_just_small:
+        return None
+
+    word_count = len(markdown.split())
+    html_lower = html.lower() if html else ''
+    if any(p in html_lower for p in AUTH_PATTERNS) and 'type="password"' in html_lower:
+        cause = 'auth_wall'
+    elif page_text_length < 100:
+        cause = 'empty_page'
+    elif page_html_length > 10 * max(len(markdown), 1):
+        cause = 'js_hydration'
+    else:
+        cause = 'unknown'
+
+    thin_read = {
+        'word_count': word_count,
+        'extracted_chars': len(markdown),
+        'page_text_chars': page_text_length,
+        'html_chars': page_html_length,
+        'title': page_title,
+        'possible_cause': cause,
+    }
+    size_label = f'{page_html_length // 1024}KB' if page_html_length >= 1024 else f'{page_html_length}B'
+    thin_msg = f'thin-read: {word_count} words extracted from {size_label} page'
+    if page_title:
+        thin_msg += f' (title: "{page_title}")'
+    thin_msg += f' — possible {cause.replace("_", " ")}'
+    print(f'[read] {thin_msg}', file=sys.stderr)
+    return thin_read
+
 
 RAW_CONTENT_TYPES = frozenset({
     'application/json',
@@ -616,13 +699,29 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             source = 'unknown'
             warning = f'Unknown source: {force_source}. Use trafilatura, readability, or innertext.'
 
+        # Thin-read diagnostics (shared with cascade path)
+        thin_read = _check_thin_read(markdown, html, page_text_length,
+                                     page_html_length, page_title)
+        if thin_read and not warning:
+            word_count = thin_read['word_count']
+            cause = thin_read['possible_cause']
+            size_label = f'{page_html_length // 1024}KB' if page_html_length >= 1024 else f'{page_html_length}B'
+            warning = f'thin-read: {word_count} words extracted from {size_label} page'
+            if page_title:
+                warning += f' (title: "{page_title}")'
+            warning += f' — possible {cause.replace("_", " ")}'
+
         if warning:
             print(f'[read] warning: {warning}', file=sys.stderr)
         print(f'[read] source: {source}', file=sys.stderr)
         if path:
             with open(path, 'w') as f:
                 f.write(markdown)
-        return {'markdown': markdown, 'warning': warning, 'source': source}
+        result = {'markdown': markdown, 'warning': warning, 'source': source,
+                  'title': page_title}
+        if thin_read:
+            result['thin_read'] = thin_read
+        return result
 
     # Stage 1: trafilatura — Python-side extraction from rendered HTML
     try:
@@ -725,41 +824,17 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             pct = round(ratio * 100, 1)
             warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{page_text_length} chars)'
 
-    # Thin-read diagnostics: flag suspiciously small extractions with possible cause.
-    # Exemption: if the page itself is small but extraction captured most of it, it's not
-    # broken — just short (e.g. example.com: 113 chars extracted / 129 page text = 87%).
-    # Thresholds: ratio ≥ 0.5 ensures we got at least half the content, text ≥ 100 avoids
-    # exempting auth walls where both page text and extraction are tiny (e.g. "Please log in").
-    thin_read = None
-    extraction_ratio = len(markdown) / page_text_length if page_text_length > 0 and markdown else 0
-    page_is_just_small = extraction_ratio >= 0.5 and page_text_length >= 100
-    if markdown is not None and len(markdown) < THIN_READ_THRESHOLD and not page_is_just_small:
-        word_count = len(markdown.split())
-        html_lower = html.lower() if html else ''
-        if any(p in html_lower for p in AUTH_PATTERNS) and 'type="password"' in html_lower:
-            cause = 'auth_wall'
-        elif page_text_length < 100:
-            cause = 'empty_page'
-        elif page_html_length > 10 * max(len(markdown), 1):
-            cause = 'js_hydration'
-        else:
-            cause = 'unknown'
-        thin_read = {
-            'word_count': word_count,
-            'extracted_chars': len(markdown),
-            'page_text_chars': page_text_length,
-            'html_chars': page_html_length,
-            'title': page_title,
-            'possible_cause': cause,
-        }
+    # Thin-read diagnostics (shared helper — also used by forced-source path above)
+    thin_read = _check_thin_read(markdown, html, page_text_length,
+                                 page_html_length, page_title)
+    if thin_read and not warning:
+        word_count = thin_read['word_count']
+        cause = thin_read['possible_cause']
         size_label = f'{page_html_length // 1024}KB' if page_html_length >= 1024 else f'{page_html_length}B'
-        thin_msg = f'thin-read: {word_count} words extracted from {size_label} page'
+        warning = f'thin-read: {word_count} words extracted from {size_label} page'
         if page_title:
-            thin_msg += f' (title: "{page_title}")'
-        thin_msg += f' — possible {cause.replace("_", " ")}'
-        print(f'[read] {thin_msg}', file=sys.stderr)
-        if not warning:
-            warning = thin_msg
+            warning += f' (title: "{page_title}")'
+        warning += f' — possible {cause.replace("_", " ")}'
 
     if warning:
         print(f'[read] warning: {warning}', file=sys.stderr)
@@ -797,6 +872,45 @@ async def do_fetch(client: CDPClient, url: str, path: str = None,
     if not stable:
         result['timed_out'] = True
     return result
+
+
+async def do_device(client: CDPClient, name: str, dpr_override: float = None):
+    """Apply device emulation preset. Fires 3-4 CDP calls."""
+    from ._devices import get_device
+    dev = get_device(name)
+    dpr = dpr_override if dpr_override is not None else dev['deviceScaleFactor']
+
+    # Viewport + DPR + mobile flag
+    metrics = {
+        'width': dev['width'], 'height': dev['height'],
+        'deviceScaleFactor': dpr, 'mobile': dev['mobile'],
+    }
+    if dev.get('orientation'):
+        metrics['screenOrientation'] = dev['orientation']
+    await client.send('Emulation.setDeviceMetricsOverride', metrics)
+
+    # User agent + platform
+    ua_params = {}
+    if dev['userAgent']:
+        ua_params['userAgent'] = dev['userAgent']
+    if dev['platform']:
+        ua_params['platform'] = dev['platform']
+    if ua_params:
+        await client.send('Emulation.setUserAgentOverride', ua_params)
+
+    # Touch emulation
+    await client.send('Emulation.setTouchEmulationEnabled', {
+        'enabled': dev['touch'],
+        'maxTouchPoints': dev['maxTouchPoints'],
+    })
+
+    # Safe area insets (notch, dynamic island)
+    if dev.get('safeArea'):
+        await client.send('Emulation.setSafeAreaInsetsOverride', {
+            'insets': dev['safeArea'],
+        })
+
+    print(f'[device] {name}: {dev["width"]}x{dev["height"]}@{dpr}x', file=sys.stderr)
 
 
 async def do_viewport(client: CDPClient, width: int, height: int):
@@ -896,6 +1010,110 @@ async def do_assert(client: CDPClient, expression: str):
         raise RuntimeError(f'Assertion failed: {expression} (got {value!r})')
 
 
+async def do_watch(client: CDPClient, path: str, fast: bool = True,
+                   debounce_ms: int = 100):
+    """Watch for HMR updates and auto-screenshot. Runs until cancelled.
+
+    Listens for Vite's console messages:
+      - '[vite] hot updated' → debounce + screenshot
+      - '[vite] page reload' → wait for load event + screenshot
+      - '[vite] connected'   → ignored (initial connection)
+
+    Also catches DOM mutations (Tailwind CSS rebuild) via a MutationObserver
+    fallback that fires a console.log we can detect.
+    """
+    # Enable console event streaming
+    await client.send('Runtime.enable')
+    queue = client.subscribe('Runtime.consoleAPICalled')
+
+    # Install MutationObserver for changes that don't trigger HMR console messages
+    # (e.g. Tailwind rebuilds injected via <style> tags)
+    await client.send('Runtime.evaluate', {
+        'expression': '''(() => {
+            let _watchTimer = null;
+            new MutationObserver(() => {
+                clearTimeout(_watchTimer);
+                _watchTimer = setTimeout(() => console.log('[passe-watch] mutation'), 150);
+            }).observe(document.documentElement, {childList: true, subtree: true, attributes: true});
+        })()''',
+        'awaitPromise': False,
+    })
+
+    capture_count = 0
+    print(json.dumps({'event': 'watch_started', 'path': path, 'fast': fast}),
+          file=sys.stderr)
+
+    try:
+        while True:
+            msg = await queue.get()
+            # Extract console message text
+            params = msg.get('params', {})
+            call_args = params.get('args', [])
+            if not call_args:
+                continue
+            text = call_args[0].get('value', '')
+            if not isinstance(text, str):
+                continue
+
+            # Classify the event
+            if '[vite] hot updated' in text or '[passe-watch] mutation' in text:
+                # Debounce: drain any queued events within the window
+                await asyncio.sleep(debounce_ms / 1000)
+                while not queue.empty():
+                    try:
+                        queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+
+                # Screenshot
+                t0 = time.monotonic()
+                info = await do_screenshot(
+                    client, path, viewport_only=True,
+                    fmt='jpeg' if fast else 'png',
+                    quality=70 if fast else None,
+                    optimize_speed=fast,
+                )
+                ms = round((time.monotonic() - t0) * 1000, 1)
+                capture_count += 1
+                event_type = 'hmr' if '[vite]' in text else 'mutation'
+                print(json.dumps({
+                    'event': event_type, 'n': capture_count,
+                    'screenshot_ms': ms, 'kb': info['kb'],
+                    'file': info['file'],
+                }), file=sys.stderr)
+
+            elif '[vite] page reload' in text:
+                # Full reload — wait for load event first
+                try:
+                    await client.wait_for_event('Page.loadEventFired', timeout=5.0)
+                except asyncio.TimeoutError:
+                    pass
+                await asyncio.sleep(debounce_ms / 1000)
+
+                t0 = time.monotonic()
+                info = await do_screenshot(
+                    client, path, viewport_only=True,
+                    fmt='jpeg' if fast else 'png',
+                    quality=70 if fast else None,
+                    optimize_speed=fast,
+                )
+                ms = round((time.monotonic() - t0) * 1000, 1)
+                capture_count += 1
+                print(json.dumps({
+                    'event': 'reload', 'n': capture_count,
+                    'screenshot_ms': ms, 'kb': info['kb'],
+                    'file': info['file'],
+                }), file=sys.stderr)
+
+    except asyncio.CancelledError:
+        pass
+    finally:
+        client.unsubscribe('Runtime.consoleAPICalled')
+        print(json.dumps({
+            'event': 'watch_stopped', 'total_captures': capture_count,
+        }), file=sys.stderr)
+
+
 # ── Script engine ─────────────────────────────────────────
 
 # eval/assert/log take the raw rest-of-line as a single argument — no shlex
@@ -969,8 +1187,9 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
     'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
-    'viewport', 'wait', 'wait-for', 'wait-navigation', 'back', 'forward',
-    'eval', 'eval-to', 'eval-file', 'eval-file-to', 'assert', 'log',
+    'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
+    'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
+    'assert', 'log',
 }
 
 # Verbs that trigger auto-wait in the next read/fetch step.
@@ -1024,12 +1243,38 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'scroll':
                 await do_scroll(client, int(args[0]), int(args[1]))
             elif verb == 'screenshot':
-                viewport_only = '--viewport' in args
-                clean_args = [a for a in args if a != '--viewport']
-                path = clean_args[0] if clean_args else None
-                info = await do_screenshot(client, path, viewport_only=viewport_only)
+                ss_args = list(args)
+                # Parse screenshot flags
+                viewport_only = '--viewport' in ss_args
+                fast = '--fast' in ss_args
+                ss_args = [a for a in ss_args if a not in ('--viewport', '--fast')]
+                ss_fmt = 'png'
+                ss_quality = None
+                ss_optimize = False
+                if '--format' in ss_args:
+                    idx = ss_args.index('--format')
+                    if idx + 1 < len(ss_args):
+                        ss_fmt = ss_args[idx + 1]
+                        del ss_args[idx:idx + 2]
+                if '--quality' in ss_args:
+                    idx = ss_args.index('--quality')
+                    if idx + 1 < len(ss_args):
+                        ss_quality = int(ss_args[idx + 1])
+                        del ss_args[idx:idx + 2]
+                if fast:
+                    ss_fmt = 'jpeg'
+                    ss_quality = ss_quality or 70
+                    ss_optimize = True
+                    viewport_only = True
+                path = ss_args[0] if ss_args else None
+                info = await do_screenshot(
+                    client, path, viewport_only=viewport_only,
+                    fmt=ss_fmt, quality=ss_quality, optimize_speed=ss_optimize,
+                )
                 step_info['file'] = info['file']
                 step_info['kb'] = info['kb']
+                step_info['format'] = info['format']
+                step_info['breakdown'] = info['breakdown']
                 files.append(info['file'])
             elif verb == 'snapshot':
                 path = args[0] if args else None
@@ -1113,6 +1358,24 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['title'] = read_result['title']
             elif verb == 'viewport':
                 await do_viewport(client, int(args[0]), int(args[1]))
+            elif verb == 'device':
+                dev_args = list(args)
+                dpr_override = None
+                if '--dpr' in dev_args:
+                    idx = dev_args.index('--dpr')
+                    if idx + 1 < len(dev_args):
+                        dpr_override = float(dev_args[idx + 1])
+                        del dev_args[idx:idx + 2]
+                await do_device(client, dev_args[0], dpr_override=dpr_override)
+            elif verb == 'watch':
+                # watch is a blocking verb — runs until killed. Must be last.
+                w_args = list(args)
+                w_fast = '--fast' in w_args
+                w_args = [a for a in w_args if a != '--fast']
+                w_path = w_args[0] if w_args else '/tmp/passe-watch.jpg'
+                await do_watch(client, w_path, fast=w_fast)
+                # do_watch only returns on cancellation — skip remaining steps
+                break
             elif verb == 'wait':
                 await asyncio.sleep(int(args[0]) / 1000)
             elif verb == 'wait-for':
@@ -1182,7 +1445,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
 # ── CLI commands ──────────────────────────────────────────
 
 async def cmd_run(source: str, inline: str = None,
-                  keep_tab: bool = False, reuse_tab: bool = False):
+                  keep_tab: bool = False, reuse_tab: bool = False,
+                  device: str = None, dpr: float = None):
     """Run a passe script from file, stdin, or inline."""
     # --reuse-tab implies --keep-tab (don't close someone else's tab)
     if reuse_tab:
@@ -1210,6 +1474,9 @@ async def cmd_run(source: str, inline: str = None,
         else:
             await client.create_tab()
         await client.send('Page.enable')
+        # Apply device preset before script if --device flag used
+        if device:
+            await do_device(client, device, dpr_override=dpr)
         summary = await run_script(client, steps)
         print(json.dumps(summary))
         sys.exit(0 if summary['ok'] else 1)
@@ -1220,11 +1487,13 @@ async def cmd_run(source: str, inline: str = None,
         await ws.close()
 
 
-async def cmd_screenshot(output: str):
+async def cmd_screenshot(output: str, device: str = None, dpr: float = None):
     """Atomic screenshot of current page."""
     ws, client = await connect()
     try:
         await client.attach_to_first_page()
+        if device:
+            await do_device(client, device, dpr_override=dpr)
         info = await do_screenshot(client, output)
         print(json.dumps({
             'ok': True, 'file': info['file'], 'kb': info['kb']
@@ -1260,6 +1529,11 @@ Usage:
   passe screenshot <output.png>                       Screenshot current page
   passe eval <expression>                             Eval JS on current page
 
+Global flags:
+  --cdp <url>       CDP endpoint (default: PASSE_CDP env or http://localhost:9222)
+  --device <name>   Device emulation preset (e.g. "iPhone 14 Pro")
+  --dpr <n>         Override device pixel ratio (e.g. 1 for faster screenshots)
+
 DSL verbs:
   Navigation:   goto, back, forward, scroll
   Interaction:  click, click-text, click-if, fill, type, select, press, hover
@@ -1276,7 +1550,33 @@ def main():
         print(USAGE, file=sys.stderr)
         sys.exit(1)
 
-    cmd = sys.argv[1]
+    # Global flags: extract before subcommand processing
+    global _cdp_override
+    all_args = sys.argv[1:]
+
+    def _extract_flag(args, flag):
+        """Extract --flag value from args, return (value, remaining_args)."""
+        if flag in args:
+            idx = args.index(flag)
+            if idx + 1 < len(args):
+                val = args[idx + 1]
+                return val, args[:idx] + args[idx + 2:]
+            print(f'{flag} requires an argument', file=sys.stderr)
+            sys.exit(1)
+        return None, args
+
+    cdp_url, all_args = _extract_flag(all_args, '--cdp')
+    if cdp_url:
+        _cdp_override = cdp_url
+    device_name, all_args = _extract_flag(all_args, '--device')
+    dpr_str, all_args = _extract_flag(all_args, '--dpr')
+    dpr_val = float(dpr_str) if dpr_str else None
+
+    # Re-derive cmd after extracting global flags
+    if not all_args:
+        print(USAGE, file=sys.stderr)
+        sys.exit(1)
+    cmd = all_args[0]
 
     if cmd in ('--version', '-V'):
         from importlib.metadata import version
@@ -1284,7 +1584,7 @@ def main():
         sys.exit(0)
     elif cmd == 'run':
         # Extract flags before positional args
-        run_args = sys.argv[2:]
+        run_args = all_args[1:]
         keep_tab = '--keep-tab' in run_args
         reuse_tab = '--reuse-tab' in run_args
         run_args = [a for a in run_args if a not in ('--keep-tab', '--reuse-tab')]
@@ -1292,18 +1592,20 @@ def main():
         if len(run_args) >= 2 and run_args[0] == '-c':
             # passe run [-flags] -c 'inline script'
             asyncio.run(cmd_run(None, inline=' '.join(run_args[1:]),
-                                keep_tab=keep_tab, reuse_tab=reuse_tab))
+                                keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                device=device_name, dpr=dpr_val))
         elif len(run_args) == 1:
             # passe run [-flags] script.passe  OR  passe run [-flags] -
             asyncio.run(cmd_run(run_args[0],
-                                keep_tab=keep_tab, reuse_tab=reuse_tab))
+                                keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                device=device_name, dpr=dpr_val))
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
-    elif cmd == 'screenshot' and len(sys.argv) == 3:
-        asyncio.run(cmd_screenshot(sys.argv[2]))
-    elif cmd == 'eval' and len(sys.argv) >= 3:
-        asyncio.run(cmd_eval(' '.join(sys.argv[2:])))
+    elif cmd == 'screenshot' and len(all_args) == 2:
+        asyncio.run(cmd_screenshot(all_args[1], device=device_name, dpr=dpr_val))
+    elif cmd == 'eval' and len(all_args) >= 2:
+        asyncio.run(cmd_eval(' '.join(all_args[1:])))
     else:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
