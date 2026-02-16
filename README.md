@@ -12,7 +12,7 @@ The browser was never slow — the agentic loop was. Every MCP tool call costs a
 There are dozens of browser automation tools now. This 2×2 captures where they all sit:
 
 ```
-                You script it              AI figures it out
+                The AI scripts it        AI feels it out
             ┌──────────────────────┬───────────────────────────┐
   Your      │                      │  Browser-Use (78K ★)      │
   Chrome    │   ★ passe            │  BrowserMCP extension     │
