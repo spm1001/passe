@@ -904,11 +904,14 @@ async def do_device(client: CDPClient, name: str, dpr_override: float = None):
         'maxTouchPoints': dev['maxTouchPoints'],
     })
 
-    # Safe area insets (notch, dynamic island)
+    # Safe area insets (notch, dynamic island) — requires Chrome 108+
     if dev.get('safeArea'):
-        await client.send('Emulation.setSafeAreaInsetsOverride', {
-            'insets': dev['safeArea'],
-        })
+        try:
+            await client.send('Emulation.setSafeAreaInsetsOverride', {
+                'insets': dev['safeArea'],
+            })
+        except Exception:
+            pass  # Older Chrome — safe area emulation unavailable
 
     print(f'[device] {name}: {dev["width"]}x{dev["height"]}@{dpr}x', file=sys.stderr)
 
