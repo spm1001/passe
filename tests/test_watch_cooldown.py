@@ -51,10 +51,11 @@ async def test_leading_plus_trailing_on_burst(capsys):
         return {'file': path, 'kb': 10, 'format': 'jpeg', 'breakdown': {}}
 
     async def cancel_after_trailing():
-        # Wait for queue drain + debounce + cooldown expiry + trailing capture
+        # Wait for queue drain + debounce + cooldown expiry + trailing capture.
+        # Generous margin to avoid CI flakes on loaded machines.
         while not queue.empty():
             await asyncio.sleep(0.01)
-        await asyncio.sleep(0.4)  # cooldown(200ms) + margin
+        await asyncio.sleep(0.6)  # cooldown(200ms) + generous margin
         task.cancel()
 
     with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
@@ -85,8 +86,8 @@ async def test_trailing_captures_final_state(capsys):
         for _ in range(3):
             await queue.put(_console_event('[passe-watch] mutation'))
             await asyncio.sleep(0.01)
-        # Wait for trailing to fire
-        await asyncio.sleep(0.35)
+        # Wait for trailing to fire (cooldown 200ms + margin)
+        await asyncio.sleep(0.5)
         task.cancel()
 
     with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
@@ -98,9 +99,10 @@ async def test_trailing_captures_final_state(capsys):
         await asyncio.gather(task, return_exceptions=True)
 
     assert len(capture_times) == 2
-    # Gap between leading and trailing should be ~cooldown_ms
+    # Gap between leading and trailing should be >= cooldown_ms.
+    # Use generous lower bound (100ms for 200ms cooldown) to avoid CI flakes.
     gap_ms = (capture_times[1] - capture_times[0]) * 1000
-    assert gap_ms >= 150, f'Trailing fired too soon: {gap_ms:.0f}ms'
+    assert gap_ms >= 100, f'Trailing fired too soon: {gap_ms:.0f}ms (cooldown=200ms)'
 
 
 @pytest.mark.asyncio

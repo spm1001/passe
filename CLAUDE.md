@@ -109,7 +109,7 @@ passe run tests/checkout-flow.passe
 - `wait <ms>` — sleep
 - `wait-for <selector> [timeout_ms]` — wait until selector matches visible element. Default 10s. **Critical for SPAs.**
 - `wait-navigation` — wait for page load event
-- `watch [--fast] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Debounces 100ms, screenshots to path. Runs until killed. Use with `Bash run_in_background`.
+- `watch [--fast] [--cooldown <ms>] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Three debounce layers: JS MutationObserver (150ms clusters rapid DOM changes), Python drain (100ms batches queued events), cooldown (default 1000ms, min interval between captures). Leading + trailing edge: captures immediately on first change, then once more after cooldown to get the final state. Runs until killed. Use with `Bash run_in_background`.
 - `assert <expression>` — eval JS, fail script if falsy. Error shows actual value.
 - `log <message>` — print to stderr
 
