@@ -102,6 +102,40 @@ async def test_navigate_error_includes_url():
         await do_navigate(client, 'http://localhost:9999')
 
 
+@pytest.mark.asyncio
+async def test_navigate_redirect_no_false_positive():
+    """301/302 redirects don't set errorText — do_navigate must not raise.
+
+    Chrome follows HTTP redirects transparently. Page.navigate returns
+    no errorText; the final URL is the redirect target. This verifies
+    henohe's navigation check doesn't break legitimate redirects.
+    (passe-riwiwo)
+    """
+    client = _mock_client()
+    client.send.side_effect = [
+        None,  # Page.enable
+        _nav_response(),  # Page.navigate — no errorText (redirect followed)
+        _eval_response('https://example.com/'),  # final URL after redirect
+    ]
+
+    # Should not raise — redirect is not a failure
+    await do_navigate(client, 'http://example.com')
+
+
+@pytest.mark.asyncio
+async def test_navigate_redirect_final_url_differs():
+    """After redirect, belt-and-suspenders URL check sees the target, not chrome-error://."""
+    client = _mock_client()
+    client.send.side_effect = [
+        None,  # Page.enable
+        _nav_response(),  # Page.navigate
+        _eval_response('https://www.example.com/landing'),  # redirected destination
+    ]
+
+    # Should not raise even though final URL differs from requested URL
+    await do_navigate(client, 'http://example.com')
+
+
 # ── 2. Scroll-before-screenshot warning ──────────────────
 
 
