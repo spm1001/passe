@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from passe.cli import _extract_flag
+from passe.cli import _extract_flag, cmd_devices
 
 
 # ── _extract_flag unit tests ─────────────────────────────
@@ -75,6 +75,35 @@ class TestExtractFlag:
         val, remaining = _extract_flag([], '--cdp')
         assert val is None
         assert remaining == []
+
+
+# ── cmd_devices ──────────────────────────────────────────
+
+
+def test_cmd_devices_lists_all_presets(capsys):
+    """cmd_devices prints all device presets with dimensions."""
+    cmd_devices()
+    output = capsys.readouterr().out
+    # All known devices should appear
+    assert 'iPhone 14 Pro' in output
+    assert 'iPhone SE' in output
+    assert 'Pixel 7' in output
+    assert 'iPad Air' in output
+    assert 'iPad Pro 11' in output
+    assert 'Desktop 1080p' in output
+    # Should show dimensions and type
+    assert '393×852' in output
+    assert 'mobile' in output
+    assert 'desktop' in output
+
+
+def test_cmd_devices_main_dispatch(capsys):
+    """'passe devices' subcommand dispatches to cmd_devices."""
+    import passe.cli as cli
+    with patch.object(sys, 'argv', ['passe', 'devices']):
+        cli.main()
+    output = capsys.readouterr().out
+    assert 'iPhone 14 Pro' in output
 
 
 # ── main() integration: flags pass through to commands ───
