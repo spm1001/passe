@@ -174,6 +174,21 @@ class CDPClient:
 _cdp_override: str | None = None
 
 
+def _extract_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
+    """Extract --flag value from args, return (value, remaining_args).
+
+    Raises SystemExit if flag is present but has no value.
+    """
+    if flag in args:
+        idx = args.index(flag)
+        if idx + 1 < len(args):
+            val = args[idx + 1]
+            return val, args[:idx] + args[idx + 2:]
+        print(f'{flag} requires an argument', file=sys.stderr)
+        sys.exit(1)
+    return None, args
+
+
 def _cdp_base_url():
     """Get CDP base URL from --cdp flag, PASSE_CDP env var, or default to localhost:9222."""
     return _cdp_override or os.environ.get('PASSE_CDP', 'http://localhost:9222')
@@ -1668,17 +1683,6 @@ def main():
     # Global flags: extract before subcommand processing
     global _cdp_override
     all_args = sys.argv[1:]
-
-    def _extract_flag(args, flag):
-        """Extract --flag value from args, return (value, remaining_args)."""
-        if flag in args:
-            idx = args.index(flag)
-            if idx + 1 < len(args):
-                val = args[idx + 1]
-                return val, args[:idx] + args[idx + 2:]
-            print(f'{flag} requires an argument', file=sys.stderr)
-            sys.exit(1)
-        return None, args
 
     cdp_url, all_args = _extract_flag(all_args, '--cdp')
     if cdp_url:
