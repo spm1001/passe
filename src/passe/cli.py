@@ -1079,7 +1079,7 @@ async def do_assert(client: CDPClient, expression: str):
 
 
 async def do_watch(client: CDPClient, path: str, fast: bool = True,
-                   debounce_ms: int = 100):
+                   debounce_ms: int = 100, cooldown_ms: int = 1000):
     """Watch for HMR updates and auto-screenshot. Runs until cancelled.
 
     Listens for Vite's console messages:
@@ -1089,6 +1089,9 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
 
     Also catches DOM mutations (Tailwind CSS rebuild) via a MutationObserver
     fallback that fires a console.log we can detect.
+
+    cooldown_ms is the minimum interval between captures, independent of debounce.
+    Prevents screenshot storms on pages with animations or continuous updates.
     """
     # Enable console event streaming
     await client.send('Runtime.enable')
@@ -1108,8 +1111,61 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
     })
 
     capture_count = 0
-    print(json.dumps({'event': 'watch_started', 'path': path, 'fast': fast}),
+    suppressed_count = 0
+    last_capture_time = 0.0  # monotonic timestamp of last screenshot
+    cooldown_sec = cooldown_ms / 1000
+    _trailing_task: asyncio.Task | None = None
+    print(json.dumps({'event': 'watch_started', 'path': path, 'fast': fast,
+                      'cooldown_ms': cooldown_ms}),
           file=sys.stderr)
+
+    async def _do_capture(event_type: str):
+        """Actually take a screenshot and log it."""
+        nonlocal capture_count, suppressed_count, last_capture_time
+        t0 = time.monotonic()
+        info = await do_screenshot(
+            client, path, viewport_only=True,
+            fmt='jpeg' if fast else 'png',
+            quality=70 if fast else None,
+            optimize_speed=fast,
+        )
+        ms = round((time.monotonic() - t0) * 1000, 1)
+        last_capture_time = time.monotonic()
+        capture_count += 1
+        log_entry = {
+            'event': event_type, 'n': capture_count,
+            'screenshot_ms': ms, 'kb': info['kb'],
+            'file': info['file'],
+        }
+        if suppressed_count > 0:
+            log_entry['suppressed_since_last'] = suppressed_count
+            suppressed_count = 0
+        print(json.dumps(log_entry), file=sys.stderr)
+
+    async def _trailing_capture(delay: float, event_type: str):
+        """Wait for remaining cooldown, then capture the final state."""
+        await asyncio.sleep(delay)
+        await _do_capture(event_type)
+
+    async def _capture(event_type: str):
+        """Leading + trailing: capture immediately if cooldown ok,
+        otherwise schedule a trailing capture for when cooldown expires."""
+        nonlocal suppressed_count, _trailing_task
+        now = time.monotonic()
+        elapsed = now - last_capture_time
+        if elapsed < cooldown_sec:
+            suppressed_count += 1
+            # Schedule trailing capture if not already pending
+            if _trailing_task is None or _trailing_task.done():
+                remaining = cooldown_sec - elapsed
+                _trailing_task = asyncio.create_task(
+                    _trailing_capture(remaining, event_type))
+            return
+
+        # Cancel any pending trailing — we're capturing now
+        if _trailing_task and not _trailing_task.done():
+            _trailing_task.cancel()
+        await _do_capture(event_type)
 
     try:
         while True:
@@ -1127,28 +1183,23 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
             if '[vite] hot updated' in text or '[passe-watch] mutation' in text:
                 # Debounce: drain any queued events within the window
                 await asyncio.sleep(debounce_ms / 1000)
+                drained = 0
                 while not queue.empty():
                     try:
                         queue.get_nowait()
+                        drained += 1
                     except asyncio.QueueEmpty:
                         break
 
-                # Screenshot
-                t0 = time.monotonic()
-                info = await do_screenshot(
-                    client, path, viewport_only=True,
-                    fmt='jpeg' if fast else 'png',
-                    quality=70 if fast else None,
-                    optimize_speed=fast,
-                )
-                ms = round((time.monotonic() - t0) * 1000, 1)
-                capture_count += 1
                 event_type = 'hmr' if '[vite]' in text else 'mutation'
-                print(json.dumps({
-                    'event': event_type, 'n': capture_count,
-                    'screenshot_ms': ms, 'kb': info['kb'],
-                    'file': info['file'],
-                }), file=sys.stderr)
+                await _capture(event_type)
+                # Drained events mean the page was still changing — schedule
+                # trailing capture to get the final state after cooldown
+                if drained > 0:
+                    suppressed_count += drained
+                    if _trailing_task is None or _trailing_task.done():
+                        _trailing_task = asyncio.create_task(
+                            _trailing_capture(cooldown_sec, event_type))
 
             elif '[vite] page reload' in text:
                 # Full reload — wait for load event first
@@ -1157,25 +1208,13 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
                 except asyncio.TimeoutError:
                     pass
                 await asyncio.sleep(debounce_ms / 1000)
-
-                t0 = time.monotonic()
-                info = await do_screenshot(
-                    client, path, viewport_only=True,
-                    fmt='jpeg' if fast else 'png',
-                    quality=70 if fast else None,
-                    optimize_speed=fast,
-                )
-                ms = round((time.monotonic() - t0) * 1000, 1)
-                capture_count += 1
-                print(json.dumps({
-                    'event': 'reload', 'n': capture_count,
-                    'screenshot_ms': ms, 'kb': info['kb'],
-                    'file': info['file'],
-                }), file=sys.stderr)
+                await _capture('reload')
 
     except asyncio.CancelledError:
         pass
     finally:
+        if _trailing_task and not _trailing_task.done():
+            _trailing_task.cancel()
         client.unsubscribe('Runtime.consoleAPICalled')
         print(json.dumps({
             'event': 'watch_stopped', 'total_captures': capture_count,
@@ -1446,8 +1485,14 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 w_args = list(args)
                 w_fast = '--fast' in w_args
                 w_args = [a for a in w_args if a != '--fast']
+                w_cooldown = 1000
+                if '--cooldown' in w_args:
+                    idx = w_args.index('--cooldown')
+                    if idx + 1 < len(w_args):
+                        w_cooldown = int(w_args[idx + 1])
+                        del w_args[idx:idx + 2]
                 w_path = w_args[0] if w_args else '/tmp/passe-watch.jpg'
-                await do_watch(client, w_path, fast=w_fast)
+                await do_watch(client, w_path, fast=w_fast, cooldown_ms=w_cooldown)
                 # do_watch only returns on cancellation — skip remaining steps
                 break
             elif verb == 'wait':
@@ -1693,7 +1738,7 @@ Control:
   wait <ms>                 Sleep
   wait-for <sel> [timeout]  Wait for selector (default 10s)
   wait-navigation           Wait for page load event
-  watch [--fast] <path>     Auto-screenshot on HMR/DOM changes
+  watch [flags] <path>      Auto-screenshot on HMR/DOM changes. --fast, --cooldown <ms> (default 1000)
   assert <expression>       Fail script if JS expression is falsy
   log <message>             Print to stderr
 
