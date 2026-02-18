@@ -1586,6 +1586,19 @@ async def cmd_eval(expression: str):
         await ws.close()
 
 
+def cmd_devices():
+    """Print available device presets as a table."""
+    from ._devices import DEVICES
+    print(f'{"Name":<16} {"Size":>11}  {"DPR":>6}  {"Type":<7}')
+    print(f'{"─" * 16} {"─" * 11}  {"─" * 6}  {"─" * 7}')
+    for name, dev in DEVICES.items():
+        size = f'{dev["width"]}×{dev["height"]}'
+        dpr_num = dev["deviceScaleFactor"]
+        dpr = f'{int(dpr_num)}x' if dpr_num == int(dpr_num) else f'{dpr_num}x'
+        kind = 'mobile' if dev['mobile'] else 'desktop'
+        print(f'{name:<16} {size:>11}  {dpr:>6}  {kind:<7}')
+
+
 # ── Entry point ───────────────────────────────────────────
 
 USAGE = """\
@@ -1597,6 +1610,7 @@ Commands:
   passe run - <<'EOF' ... EOF     Run from stdin
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
+  passe devices                   List available device presets
 
 Global flags:
   --cdp <url>       CDP endpoint (default: PASSE_CDP env or http://localhost:9222)
@@ -1731,6 +1745,8 @@ def main():
         _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val))
     elif cmd == 'eval' and len(all_args) >= 2:
         _run(cmd_eval(' '.join(all_args[1:])))
+    elif cmd == 'devices':
+        cmd_devices()
     else:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
