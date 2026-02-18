@@ -539,6 +539,77 @@ async def do_tap(client: CDPClient, selector: str):
         raise RuntimeError(f'tap failed: {desc}')
 
 
+async def do_swipe(client: CDPClient, selector: str, direction: str, distance: int = 200) -> dict:
+    """Dispatch a touch swipe gesture (touchstart + touchmove sequence + touchend).
+
+    Same JS synthesis approach as do_tap — CDP Input.dispatchTouchEvent
+    doesn't work through flattened sessions.
+
+    Returns dict with start/end coordinates for step NDJSON reporting.
+    """
+    # Direction → (dx, dy) unit vector
+    vectors = {'left': (-1, 0), 'right': (1, 0), 'up': (0, -1), 'down': (0, 1)}
+    if direction not in vectors:
+        raise RuntimeError(f'swipe: unknown direction {direction!r} — use left, right, up, down')
+    dx, dy = vectors[direction]
+    steps = 8  # intermediate touchmove points for realism
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        const rect = el.getBoundingClientRect();
+        const cx = rect.x + rect.width / 2;
+        const cy = rect.y + rect.height / 2;
+        const dx = {dx * distance};
+        const dy = {dy * distance};
+        const steps = {steps};
+        const startX = cx - dx / 2;
+        const startY = cy - dy / 2;
+
+        function mkTouch(x, y) {{
+            return new Touch({{
+                identifier: 1, target: el,
+                clientX: x, clientY: y, pageX: x, pageY: y
+            }});
+        }}
+
+        // touchstart
+        const t0 = mkTouch(startX, startY);
+        el.dispatchEvent(new TouchEvent('touchstart', {{
+            touches: [t0], targetTouches: [t0], changedTouches: [t0],
+            bubbles: true, cancelable: true
+        }}));
+
+        // touchmove sequence
+        for (let i = 1; i <= steps; i++) {{
+            const frac = i / steps;
+            const t = mkTouch(startX + dx * frac, startY + dy * frac);
+            el.dispatchEvent(new TouchEvent('touchmove', {{
+                touches: [t], targetTouches: [t], changedTouches: [t],
+                bubbles: true, cancelable: true
+            }}));
+        }}
+
+        // touchend at final position
+        const tEnd = mkTouch(startX + dx, startY + dy);
+        el.dispatchEvent(new TouchEvent('touchend', {{
+            touches: [], targetTouches: [], changedTouches: [tEnd],
+            bubbles: true, cancelable: true
+        }}));
+
+        return JSON.stringify({{
+            startX: Math.round(startX), startY: Math.round(startY),
+            endX: Math.round(startX + dx), endY: Math.round(startY + dy)
+        }});
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'swipe failed: {desc}')
+    return json.loads(result['result']['result']['value'])
+
+
 async def do_scroll(client: CDPClient, x: int, y: int):
     await client.send('Runtime.evaluate', {
         'expression': f'window.scrollTo({x}, {y})',
@@ -1345,7 +1416,7 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
-    'press', 'hover', 'tap', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
+    'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
     'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log',
@@ -1401,6 +1472,11 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 await do_hover(client, args[0])
             elif verb == 'tap':
                 await do_tap(client, args[0])
+            elif verb == 'swipe':
+                dist = int(args[2]) if len(args) > 2 else 200
+                swipe_result = await do_swipe(client, args[0], args[1], dist)
+                step_info['start'] = [swipe_result['startX'], swipe_result['startY']]
+                step_info['end'] = [swipe_result['endX'], swipe_result['endY']]
             elif verb == 'scroll':
                 await do_scroll(client, int(args[0]), int(args[1]))
             elif verb == 'screenshot':
@@ -1773,6 +1849,7 @@ Interaction:
   press <key>               Keypress (Enter, Tab, Escape, etc.)
   hover <selector>          Mouseover event
   tap <selector>            Touch event (touchStart + touchEnd) for mobile UI
+  swipe <sel> <dir> [dist]  Swipe gesture (left/right/up/down, default 200px)
 
 Observation:
   screenshot [flags] [path] Full-page by default (entire document, max 16384px — no need to scroll).
