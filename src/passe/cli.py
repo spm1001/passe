@@ -504,6 +504,41 @@ async def do_hover(client: CDPClient, selector: str):
     })
 
 
+async def do_tap(client: CDPClient, selector: str):
+    """Dispatch real touch events (touchstart + touchend) on element center.
+
+    Uses JS TouchEvent synthesis rather than CDP Input.dispatchTouchEvent
+    because the CDP method doesn't respond through flattened sessions
+    (browser-level WS + sessionId).  JS synthesis is reliable, portable,
+    and fires the same events real touches do.
+    """
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
+        const rect = el.getBoundingClientRect();
+        const x = rect.x + rect.width / 2;
+        const y = rect.y + rect.height / 2;
+        const touch = new Touch({{
+            identifier: 1, target: el,
+            clientX: x, clientY: y, pageX: x, pageY: y
+        }});
+        el.dispatchEvent(new TouchEvent('touchstart', {{
+            touches: [touch], targetTouches: [touch], changedTouches: [touch],
+            bubbles: true, cancelable: true
+        }}));
+        el.dispatchEvent(new TouchEvent('touchend', {{
+            touches: [], targetTouches: [], changedTouches: [touch],
+            bubbles: true, cancelable: true
+        }}));
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
+        raise RuntimeError(f'tap failed: {desc}')
+
+
 async def do_scroll(client: CDPClient, x: int, y: int):
     await client.send('Runtime.evaluate', {
         'expression': f'window.scrollTo({x}, {y})',
@@ -1310,7 +1345,7 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
-    'press', 'hover', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
+    'press', 'hover', 'tap', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
     'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log',
@@ -1364,6 +1399,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 await do_press(client, args[0])
             elif verb == 'hover':
                 await do_hover(client, args[0])
+            elif verb == 'tap':
+                await do_tap(client, args[0])
             elif verb == 'scroll':
                 await do_scroll(client, int(args[0]), int(args[1]))
             elif verb == 'screenshot':
@@ -1735,6 +1772,7 @@ Interaction:
   select <selector> <value> Dropdown selection
   press <key>               Keypress (Enter, Tab, Escape, etc.)
   hover <selector>          Mouseover event
+  tap <selector>            Touch event (touchStart + touchEnd) for mobile UI
 
 Observation:
   screenshot [flags] [path] Full-page by default (entire document, max 16384px — no need to scroll).
