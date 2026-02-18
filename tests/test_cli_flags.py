@@ -1,16 +1,18 @@
 """
-Test: CLI flag parsing (--cdp, --device, --dpr).
+Test: CLI flag parsing and platform-aware Chrome discovery.
 
-Tests _extract_flag directly (pure function, no browser needed) and
-main() integration for flag-to-command passthrough.
+Tests _extract_flag directly (pure function, no browser needed),
+_find_chrome platform logic, and main() integration for flag-to-command
+passthrough.
 """
 
+import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from passe.cli import _extract_flag, cmd_devices
+from passe.cli import _extract_flag, _find_chrome, cmd_devices
 
 
 # ── _extract_flag unit tests ─────────────────────────────
@@ -104,6 +106,72 @@ def test_cmd_devices_main_dispatch(capsys):
         cli.main()
     output = capsys.readouterr().out
     assert 'iPhone 14 Pro' in output
+
+
+# ── _find_chrome platform-aware discovery ────────────────
+
+
+class TestFindChrome:
+    """Tests for platform-aware Chrome/Chromium discovery."""
+
+    def test_macos_finds_chrome_app(self):
+        """On macOS, finds /Applications/Google Chrome.app."""
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('os.path.isfile', return_value=True):
+            mock_sys.platform = 'darwin'
+            result = _find_chrome()
+        assert result == '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+
+    def test_macos_returns_none_when_missing(self):
+        """On macOS with no Chrome installed, returns None."""
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('os.path.isfile', return_value=False):
+            mock_sys.platform = 'darwin'
+            result = _find_chrome()
+        assert result is None
+
+    def test_linux_finds_chromium_browser(self):
+        """On Linux, finds first candidate in PATH."""
+        def fake_which(name):
+            return '/usr/bin/chromium-browser' if name == 'chromium-browser' else None
+
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('shutil.which', side_effect=fake_which):
+            mock_sys.platform = 'linux'
+            result = _find_chrome()
+        assert result == '/usr/bin/chromium-browser'
+
+    def test_linux_falls_through_to_google_chrome(self):
+        """On Linux, tries candidates in order until one is found."""
+        def fake_which(name):
+            return '/usr/bin/google-chrome' if name == 'google-chrome' else None
+
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('shutil.which', side_effect=fake_which):
+            mock_sys.platform = 'linux'
+            result = _find_chrome()
+        assert result == '/usr/bin/google-chrome'
+
+    def test_linux_returns_none_when_no_chrome(self):
+        """On Linux with nothing installed, returns None."""
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('shutil.which', return_value=None):
+            mock_sys.platform = 'linux'
+            result = _find_chrome()
+        assert result is None
+
+    def test_linux_prefers_chromium_browser_over_google_chrome(self):
+        """chromium-browser is tried first (common on Debian/Ubuntu)."""
+        def fake_which(name):
+            if name in ('chromium-browser', 'google-chrome'):
+                return f'/usr/bin/{name}'
+            return None
+
+        with patch('passe.cli.sys') as mock_sys, \
+             patch('shutil.which', side_effect=fake_which):
+            mock_sys.platform = 'linux'
+            result = _find_chrome()
+        assert result == '/usr/bin/chromium-browser'
 
 
 # ── main() integration: flags pass through to commands ───

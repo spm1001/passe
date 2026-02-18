@@ -202,12 +202,39 @@ def _chrome_running() -> bool:
         return False
 
 
+def _find_chrome() -> str:
+    """Find a Chrome/Chromium executable for the current platform."""
+    import shutil
+    if sys.platform == 'darwin':
+        candidates = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+    else:
+        # Linux: try common names in PATH order
+        candidates = ['chromium-browser', 'chromium', 'google-chrome-stable', 'google-chrome']
+    for candidate in candidates:
+        if '/' in candidate:
+            # Absolute path — check directly
+            if os.path.isfile(candidate):
+                return candidate
+        else:
+            found = shutil.which(candidate)
+            if found:
+                return found
+    return None
+
+
 def _start_chrome(port=9222):
     """Launch Chrome with debug profile if not running. Only works locally."""
     import subprocess
     from pathlib import Path
-    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-    print("Starting Chrome Debug...", file=sys.stderr)
+    chrome_path = _find_chrome()
+    if not chrome_path:
+        print(
+            "No Chrome/Chromium found.\n"
+            f"Install Chrome or set PASSE_CDP to an existing instance.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    print(f"Starting Chrome Debug ({os.path.basename(chrome_path)})...", file=sys.stderr)
     try:
         subprocess.Popen(
             [chrome_path,
