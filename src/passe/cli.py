@@ -191,14 +191,24 @@ def _start_chrome(port=9222):
     """Launch Chrome with debug profile if not running. Only works locally."""
     import subprocess
     from pathlib import Path
+    chrome_path = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
     print("Starting Chrome Debug...", file=sys.stderr)
-    subprocess.Popen(
-        ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-         f'--remote-debugging-port={port}',
-         '--user-data-dir=' + str(Path.home() / '.chrome-debug'),
-         '--no-default-browser-check'],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-    )
+    try:
+        subprocess.Popen(
+            [chrome_path,
+             f'--remote-debugging-port={port}',
+             '--user-data-dir=' + str(Path.home() / '.chrome-debug'),
+             '--no-default-browser-check'],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        print(
+            f"Chrome not found at {chrome_path}\n"
+            f"Start Chrome manually with --remote-debugging-port={port} "
+            f"or set PASSE_CDP to an existing Chrome instance.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     for _ in range(30):
         if _chrome_running():
             print("Chrome Debug started.", file=sys.stderr)
@@ -214,7 +224,12 @@ async def connect(port=9222):
     is_remote = 'localhost' not in base_url and '127.0.0.1' not in base_url
     if not _chrome_running():
         if is_remote:
-            print(f"Cannot reach Chrome at {base_url}", file=sys.stderr)
+            print(
+                f"Cannot connect to Chrome at {base_url}\n"
+                f"Check that Chrome is running with --remote-debugging-port "
+                f"or set PASSE_CDP to the correct endpoint.",
+                file=sys.stderr,
+            )
             sys.exit(1)
         _start_chrome(port)
     with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
@@ -237,8 +252,16 @@ async def connect(port=9222):
 async def do_navigate(client: CDPClient, url: str):
     await client.send('Page.enable')
     load_fut = client.wait_for_event('Page.loadEventFired')
-    await client.send('Page.navigate', {'url': url})
+    nav_result = await client.send('Page.navigate', {'url': url})
     await load_fut
+    # Detect navigation failure — Chrome loads chrome-error:// silently
+    error_text = nav_result.get('result', {}).get('errorText')
+    if error_text:
+        raise RuntimeError(f'Navigation failed: {error_text} — {url}')
+    # Belt-and-suspenders: check URL in case errorText wasn't set
+    current_url = await do_eval(client, 'window.location.href')
+    if current_url.startswith('chrome-error://'):
+        raise RuntimeError(f'Navigation failed: page did not load — {url}')
 
 
 async def do_back(client: CDPClient):
@@ -1269,6 +1292,12 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     ss_quality = ss_quality or 70
                     ss_optimize = True
                     viewport_only = True
+                if prev_verb == 'scroll' and not viewport_only:
+                    print(
+                        '[screenshot] hint: screenshot is full-page by default'
+                        ' (max 16384px) — scroll before screenshot is usually'
+                        ' unnecessary', file=sys.stderr,
+                    )
                 path = ss_args[0] if ss_args else None
                 info = await do_screenshot(
                     client, path, viewport_only=viewport_only,
@@ -1490,16 +1519,40 @@ async def cmd_run(source: str, inline: str = None,
         await ws.close()
 
 
-async def cmd_screenshot(output: str, device: str = None, dpr: float = None):
-    """Atomic screenshot of current page."""
+async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
+    """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
+    fast = '--fast' in args
+    viewport_only = '--viewport' in args
+    args = [a for a in args if a not in ('--fast', '--viewport')]
+    fmt = 'png'
+    quality = None
+    optimize = False
+    if '--format' in args:
+        idx = args.index('--format')
+        if idx + 1 < len(args):
+            fmt = args[idx + 1]
+            del args[idx:idx + 2]
+    if '--quality' in args:
+        idx = args.index('--quality')
+        if idx + 1 < len(args):
+            quality = int(args[idx + 1])
+            del args[idx:idx + 2]
+    if fast:
+        fmt = 'jpeg'
+        quality = quality or 70
+        optimize = True
+        viewport_only = True
+    output = args[0] if args else None
     ws, client = await connect()
     try:
         await client.attach_to_first_page()
         if device:
             await do_device(client, device, dpr_override=dpr)
-        info = await do_screenshot(client, output)
+        info = await do_screenshot(client, output, viewport_only=viewport_only,
+                                   fmt=fmt, quality=quality, optimize_speed=optimize)
         print(json.dumps({
-            'ok': True, 'file': info['file'], 'kb': info['kb']
+            'ok': True, 'file': info['file'], 'kb': info['kb'],
+            'format': info['format'],
         }))
     finally:
         await client.stop()
@@ -1520,32 +1573,91 @@ async def cmd_eval(expression: str):
 
 # ── Entry point ───────────────────────────────────────────
 
-USAGE = """passe — fast CDP browser automation
+USAGE = """\
+passe — fast CDP browser automation
 
-Usage:
-  passe run -c 'goto URL; screenshot /tmp/out.png'   Inline script
-  passe run script.passe                              Script file
-  passe run - <<'EOF' ... EOF                         Stdin
-  passe run --keep-tab -c '...'                       Keep tab open after script
-  passe run --reuse-tab -c '...'                      Use existing visible tab
-
-  passe screenshot <output.png>                       Screenshot current page
-  passe eval <expression>                             Eval JS on current page
+Commands:
+  passe run -c 'verbs...'         Run inline script
+  passe run script.passe          Run script file
+  passe run - <<'EOF' ... EOF     Run from stdin
+  passe screenshot [flags] <out>  Screenshot current page
+  passe eval <expression>         Eval JS on current page
 
 Global flags:
   --cdp <url>       CDP endpoint (default: PASSE_CDP env or http://localhost:9222)
   --device <name>   Device emulation preset (e.g. "iPhone 14 Pro")
-  --dpr <n>         Override device pixel ratio (e.g. 1 for faster screenshots)
+  --dpr <n>         Override device pixel ratio
 
-DSL verbs:
-  Navigation:   goto, back, forward, scroll
-  Interaction:  click, click-text, click-if, fill, type, select, press, hover
-  Observation:  screenshot, snapshot, read, fetch, eval, eval-to,
-                eval-file, eval-file-to
-  Control:      wait, wait-for, wait-navigation, viewport, assert, log
+Run flags:
+  --keep-tab        Keep tab open after script
+  --reuse-tab       Attach to existing visible tab (implies --keep-tab)
 
-Output: NDJSON per step on stderr, summary JSON on stdout.
+Screenshot flags:
+  --fast            JPEG q70, viewport-only, optimizeForSpeed
+  --viewport        Viewport only (default is full-page)
+  --format <fmt>    png, jpeg, or webp (default: png)
+  --quality <n>     0-100, for jpeg/webp
+
+Use 'passe run --help' for the verb reference.
 """
+
+RUN_HELP = """\
+passe run — DSL verb reference
+
+Navigation:
+  goto <url>                Navigate and wait for load
+  back / forward            Browser history
+
+Interaction:
+  click <selector>          CSS selector click
+  click-text <"label">      Find by visible text, click
+  click-if <selector>       Click if exists, silently skip if not
+  type <selector> <text>    Character-by-character input (works with React)
+  fill <selector> <value>   Set value directly (plain HTML forms only)
+  select <selector> <value> Dropdown selection
+  press <key>               Keypress (Enter, Tab, Escape, etc.)
+  hover <selector>          Mouseover event
+
+Observation:
+  screenshot [flags] [path] Full-page by default (entire document, max 16384px — no need to scroll).
+                            --viewport for visible area only. Flags: --fast, --viewport, --format, --quality
+  snapshot [path]           List interactive elements with CSS selectors
+  read [flags] [path]       Extract page content as markdown (flags: --source, --no-wait)
+  fetch <url> [flags] [path] goto + auto-wait + read in one step (flags: --source)
+  eval <expression>         Run JS, result to stdout
+  eval-to <path> <expr>     Run JS, write result to file
+  eval-file <js-path>       Run JS from file
+  eval-file-to <out> <js>   Run JS from file, write to file
+
+Emulation:
+  device <"name"> [--dpr N] Apply device preset (iPhone 14 Pro, Pixel 7, etc.)
+  viewport <w> <h>          Set raw viewport dimensions
+
+Control:
+  wait <ms>                 Sleep
+  wait-for <sel> [timeout]  Wait for selector (default 10s)
+  wait-navigation           Wait for page load event
+  watch [--fast] <path>     Auto-screenshot on HMR/DOM changes
+  assert <expression>       Fail script if JS expression is falsy
+  log <message>             Print to stderr
+
+Rarely needed:
+  scroll <x> <y>            Position viewport (for lazy-load triggers or --viewport shots).
+                            Most verbs work regardless of scroll position.
+"""
+
+
+def _run(coro):
+    """Run an async command, catching unexpected exceptions as one-line errors."""
+    try:
+        asyncio.run(coro)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        print(f'passe: {exc}', file=sys.stderr)
+        sys.exit(1)
 
 
 def main():
@@ -1581,34 +1693,40 @@ def main():
         sys.exit(1)
     cmd = all_args[0]
 
-    if cmd in ('--version', '-V'):
+    if cmd in ('--help', '-h'):
+        print(USAGE)
+        sys.exit(0)
+    elif cmd in ('--version', '-V'):
         from importlib.metadata import version
         print(f"passe {version('passe')}")
         sys.exit(0)
     elif cmd == 'run':
         # Extract flags before positional args
         run_args = all_args[1:]
+        if '--help' in run_args or '-h' in run_args:
+            print(RUN_HELP)
+            sys.exit(0)
         keep_tab = '--keep-tab' in run_args
         reuse_tab = '--reuse-tab' in run_args
         run_args = [a for a in run_args if a not in ('--keep-tab', '--reuse-tab')]
 
         if len(run_args) >= 2 and run_args[0] == '-c':
             # passe run [-flags] -c 'inline script'
-            asyncio.run(cmd_run(None, inline=' '.join(run_args[1:]),
+            _run(cmd_run(None, inline=' '.join(run_args[1:]),
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 device=device_name, dpr=dpr_val))
         elif len(run_args) == 1:
             # passe run [-flags] script.passe  OR  passe run [-flags] -
-            asyncio.run(cmd_run(run_args[0],
+            _run(cmd_run(run_args[0],
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 device=device_name, dpr=dpr_val))
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
-    elif cmd == 'screenshot' and len(all_args) == 2:
-        asyncio.run(cmd_screenshot(all_args[1], device=device_name, dpr=dpr_val))
+    elif cmd == 'screenshot' and len(all_args) >= 2:
+        _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val))
     elif cmd == 'eval' and len(all_args) >= 2:
-        asyncio.run(cmd_eval(' '.join(all_args[1:])))
+        _run(cmd_eval(' '.join(all_args[1:])))
     else:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
