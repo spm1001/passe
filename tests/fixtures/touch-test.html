@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui; padding: 20px; }
+  .btn { padding: 20px 40px; margin: 10px; font-size: 18px; border: 2px solid #333; border-radius: 8px; display: block; }
+  #log { margin-top: 20px; padding: 10px; background: #f0f0f0; white-space: pre-wrap; font-family: monospace; min-height: 200px; }
+  .swipe-area { width: 100%; height: 150px; background: #e0e0ff; display: flex; align-items: center; justify-content: center; margin: 10px 0; border-radius: 8px; }
+</style>
+</head>
+<body>
+<h2>Touch vs Click Test</h2>
+
+<button class="btn" id="click-btn">Click me (onclick)</button>
+<button class="btn" id="touch-btn">Tap me (touchstart only)</button>
+
+<div class="swipe-area" id="swipe-area">Swipe left/right here</div>
+
+<div id="log">Event log:</div>
+
+<script>
+const log = document.getElementById('log');
+function addLog(msg) { log.textContent += '\n' + msg; }
+
+// Button 1: responds to click events (should work with el.click())
+document.getElementById('click-btn').addEventListener('click', () => {
+  addLog('✅ click-btn: CLICK event fired');
+});
+
+// Button 2: ONLY responds to touchstart (el.click() won't trigger this)
+document.getElementById('touch-btn').addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  addLog('✅ touch-btn: TOUCHSTART event fired');
+});
+// Also log if click fires on touch-btn (it shouldn't in touch-only handler)
+document.getElementById('touch-btn').addEventListener('click', () => {
+  addLog('⚠️ touch-btn: CLICK event fired (not touch)');
+});
+
+// Swipe detection
+const swipe = document.getElementById('swipe-area');
+let startX = 0;
+swipe.addEventListener('touchstart', (e) => {
+  startX = e.touches[0].clientX;
+  addLog('🔵 swipe: touchstart at x=' + startX);
+});
+swipe.addEventListener('touchend', (e) => {
+  const endX = e.changedTouches[0].clientX;
+  const diff = endX - startX;
+  if (Math.abs(diff) > 50) {
+    addLog('✅ swipe: ' + (diff > 0 ? 'RIGHT' : 'LEFT') + ' swipe detected (dx=' + diff + ')');
+  } else {
+    addLog('🔵 swipe: touchend at x=' + endX + ' (no swipe, dx=' + diff + ')');
+  }
+});
+swipe.addEventListener('click', () => {
+  addLog('⚠️ swipe: CLICK event (not touch)');
+});
+</script>
+</body>
+</html>
