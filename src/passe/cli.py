@@ -1090,8 +1090,21 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
     Also catches DOM mutations (Tailwind CSS rebuild) via a MutationObserver
     fallback that fires a console.log we can detect.
 
-    cooldown_ms is the minimum interval between captures, independent of debounce.
-    Prevents screenshot storms on pages with animations or continuous updates.
+    Three debounce layers prevent screenshot storms:
+
+      1. JS MutationObserver (150ms) — clusters rapid DOM mutations into a
+         single console.log('[passe-watch] mutation'). Without this, each
+         DOM node added fires separately.
+
+      2. Python debounce drain (debounce_ms, default 100ms) — after receiving
+         an event, sleeps then drains any queued events. Clusters events that
+         arrive in bursts (e.g. multiple HMR modules updating).
+
+      3. Cooldown (cooldown_ms, default 1000ms) — minimum interval between
+         captures, leading + trailing edge. Captures immediately on first
+         event (leading), then once more after cooldown expires if anything
+         was suppressed (trailing). The trailing capture gets the final page
+         state, which is what matters most.
     """
     # Enable console event streaming
     await client.send('Runtime.enable')
@@ -1145,7 +1158,11 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
     async def _trailing_capture(delay: float, event_type: str):
         """Wait for remaining cooldown, then capture the final state."""
         await asyncio.sleep(delay)
-        await _do_capture(event_type)
+        try:
+            await _do_capture(event_type)
+        except Exception as e:
+            print(json.dumps({'event': 'trailing_error', 'error': str(e)}),
+                  file=sys.stderr)
 
     async def _capture(event_type: str):
         """Leading + trailing: capture immediately if cooldown ok,
