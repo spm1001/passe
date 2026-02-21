@@ -456,3 +456,47 @@ def test_summary_includes_body_bytes():
     # so we just verify summary doesn't break with extra keys
     summary = _build_capture_summary(requests)
     assert summary['requests'] == 2
+
+
+# ── Capture position warning ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_capture_mid_script_warns(capsys):
+    """capture not at index 0 emits a position warning on stderr."""
+    from unittest.mock import AsyncMock
+    from passe.cli import run_script
+
+    client = AsyncMock(spec=CDPClient)
+    client.send = AsyncMock(return_value={'result': {'result': {'value': 'http://mock/'}}})
+    client.wait_for_event = AsyncMock(return_value={})
+    client._network_requests = {}
+
+    steps = [
+        ('goto', ['http://example.com']),
+        ('capture', ['/tmp/reqs.jsonl']),
+    ]
+    await run_script(client, steps)
+
+    stderr = capsys.readouterr().err
+    assert 'Warning: capture is not the first verb' in stderr
+
+
+@pytest.mark.asyncio
+async def test_capture_first_verb_no_warning(capsys):
+    """capture at index 0 produces no position warning."""
+    from unittest.mock import AsyncMock
+    from passe.cli import run_script
+
+    client = AsyncMock(spec=CDPClient)
+    client.send = AsyncMock(return_value={'result': {'result': {'value': 'http://mock/'}}})
+    client.wait_for_event = AsyncMock(return_value={})
+    client._network_requests = {}
+
+    steps = [
+        ('capture', ['/tmp/reqs.jsonl']),
+    ]
+    await run_script(client, steps)
+
+    stderr = capsys.readouterr().err
+    assert 'Warning: capture is not the first verb' not in stderr
