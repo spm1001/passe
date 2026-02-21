@@ -46,6 +46,8 @@ Passe connects to Chrome on port 9222. Two modes:
 
 Use `--cdp http://host:9222` to target a specific Chrome instance per-invocation (overrides `PASSE_CDP` env var). Default: localhost:9222.
 
+**Kube → Mac connection:** Mac exposes Chrome Debug via `tailscale serve --bg --tcp 9222 tcp://localhost:9222`. Kube has `PASSE_CDP=http://<mac-tailscale-ip>:9222` in `.bashrc`. Passe auto-rewrites WebSocket URLs. **If it fails:** check for stale Chrome processes on Mac (`lsof -i :9222`) — old PIDs hogging port 9222 is the most common cause.
+
 ## Invocation
 
 ```bash
