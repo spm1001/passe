@@ -126,7 +126,7 @@ passe run tests/checkout-flow.passe
 **Control:**
 - `wait <ms>` — sleep
 - `wait-for <selector> [timeout_ms]` — wait until selector matches visible element. Default 10s. **Critical for SPAs.**
-- `wait-idle [timeout_ms]` — wait until network requests settle (in-flight count at zero for 500ms). Default 30s timeout. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use `wait-idle` instead of guessed `wait` delays. Step NDJSON: `settled_after_ms`, `timed_out`.
+- `wait-idle [timeout_ms]` — wait until network requests settle (in-flight count at zero for 500ms). Default 30s timeout. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use `wait-idle` instead of guessed `wait` delays. Step NDJSON: `settled_after_ms`, `timed_out`. **Caveat:** sites with analytics beacons, websockets, or long-polling may never settle — use a short timeout (e.g. `wait-idle 5000`) or prefer `wait-for <selector>` when you know what content to expect.
 - `wait-navigation` — wait for page load event
 - `watch [--fast] [--cooldown <ms>] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Three debounce layers: JS MutationObserver (150ms clusters rapid DOM changes), Python drain (100ms batches queued events), cooldown (default 1000ms, min interval between captures). Leading + trailing edge: captures immediately on first change, then once more after cooldown to get the final state. Runs until killed. Use with `Bash run_in_background`.
 - `assert <expression>` — eval JS, fail script if falsy. Error shows actual value.
