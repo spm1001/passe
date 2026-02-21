@@ -37,6 +37,20 @@ If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-d
 
 **Never assume you have auth unless you've confirmed Chrome is Sameer's daily driver instance.**
 
+### Remote Chrome from kube
+
+Chrome Debug on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--remote-debugging-address=0.0.0.0`). Kube reaches it via `tailscale serve`:
+
+| Where | What |
+|-------|------|
+| **Mac** | `tailscale serve --bg --tcp 9222 tcp://localhost:9222` (persistent, survives reboots) |
+| **Kube** | `PASSE_CDP=http://100.66.153.39:9222` in `.bashrc` |
+| **Passe** | WebSocket URL rewriting in `connect()` — rewrites `ws://localhost:...` to use the Tailscale IP |
+
+**Verify:** `curl -s $PASSE_CDP/json/version` should return Chrome's version JSON.
+
+**If connection fails but Chrome is running:** Check for stale Chrome processes hogging port 9222. `lsof -i :9222` on the Mac — if old PIDs hold the port, kill them and restart Chrome Debug. This is the most common failure mode.
+
 ### Tab isolation
 
 `passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on exit. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
