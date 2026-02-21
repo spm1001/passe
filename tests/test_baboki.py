@@ -29,6 +29,9 @@ def _mock_client():
     # prevents unawaited-coroutine warnings from final_url eval.
     client.send = AsyncMock(return_value=_eval_response('http://mock/'))
     client.wait_for_event = AsyncMock(return_value={})
+    # Network infrastructure — ensure_network short-circuits when already enabled
+    client._network_enabled = True
+    client._network_requests = {}
     return client
 
 
@@ -134,6 +137,71 @@ async def test_navigate_redirect_final_url_differs():
 
     # Should not raise even though final URL differs from requested URL
     await do_navigate(client, 'http://example.com')
+
+
+@pytest.mark.asyncio
+async def test_navigate_returns_url_and_status_code():
+    """do_navigate returns dict with url and status_code from network events."""
+    client = _mock_client()
+    client.send.side_effect = [
+        None,  # Page.enable
+        _nav_response(),  # Page.navigate
+        _eval_response('https://example.com/'),  # window.location.href
+    ]
+    # Simulate a Document response in network requests
+    client._network_requests = {
+        'req1': {
+            'resource_type': 'Document',
+            'url': 'https://example.com/',
+            'status': 200,
+        }
+    }
+
+    result = await do_navigate(client, 'https://example.com')
+    assert result == {'url': 'https://example.com/', 'status_code': 200}
+
+
+@pytest.mark.asyncio
+async def test_navigate_status_code_none_when_no_match():
+    """status_code is None when no matching Document request found."""
+    client = _mock_client()
+    client.send.side_effect = [
+        None,  # Page.enable
+        _nav_response(),  # Page.navigate
+        _eval_response('https://example.com/'),  # window.location.href
+    ]
+    client._network_requests = {}
+
+    result = await do_navigate(client, 'https://example.com')
+    assert result['url'] == 'https://example.com/'
+    assert result['status_code'] is None
+
+
+@pytest.mark.asyncio
+async def test_goto_step_info_includes_url_and_status(capsys):
+    """goto verb in run_script emits url and status_code in step NDJSON."""
+    client = _mock_client()
+    client._network_requests = {
+        'req1': {
+            'resource_type': 'Document',
+            'url': 'https://example.com/',
+            'status': 403,
+        }
+    }
+    client.send.side_effect = [
+        None,  # Page.enable
+        _nav_response(),  # Page.navigate
+        _eval_response('https://example.com/'),  # do_navigate → location.href
+        _eval_response('https://example.com/'),  # final_url in summary
+    ]
+
+    result = await run_script(client, [('goto', ['https://example.com'])])
+    assert result['ok'] is True
+
+    stderr = capsys.readouterr().err
+    step = json.loads(stderr.strip().split('\n')[0])
+    assert step['url'] == 'https://example.com/'
+    assert step['status_code'] == 403
 
 
 # ── 2. Scroll-before-screenshot warning ──────────────────

@@ -76,7 +76,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 ## Verb reference
 
-**Navigation:** `goto <url>`, `back`, `forward`, `scroll <x> <y>`
+**Navigation:** `goto <url>` (step NDJSON: `url`, `status_code`), `back`, `forward` (step NDJSON: `url`), `scroll <x> <y>`
 
 **Interaction:**
 - `click <selector>` — CSS selector

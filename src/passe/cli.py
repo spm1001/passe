@@ -119,8 +119,14 @@ class CDPClient:
 
     # ── Network capture ──────────────────────────────────
 
+    async def ensure_network(self):
+        """Enable Network domain if not already enabled. Does not clear requests."""
+        if not self._network_enabled:
+            self._network_enabled = True
+            await self.send('Network.enable')
+
     async def enable_network(self):
-        """Enable Network domain and start collecting requests."""
+        """Enable Network domain and start a fresh capture (clears requests)."""
         self._network_requests.clear()
         self._network_enabled = True
         await self.send('Network.enable')
@@ -357,8 +363,10 @@ async def connect(port=9222):
 
 # ── Actions ───────────────────────────────────────────────
 
-async def do_navigate(client: CDPClient, url: str):
+async def do_navigate(client: CDPClient, url: str) -> dict:
+    """Navigate to url. Returns {'url': final_url, 'status_code': int|None}."""
     await client.send('Page.enable')
+    await client.ensure_network()
     load_fut = client.wait_for_event('Page.loadEventFired')
     nav_result = await client.send('Page.navigate', {'url': url})
     await load_fut
@@ -370,24 +378,37 @@ async def do_navigate(client: CDPClient, url: str):
     current_url = await do_eval(client, 'window.location.href')
     if current_url.startswith('chrome-error://'):
         raise RuntimeError(f'Navigation failed: page did not load — {url}')
+    # Find status code from network events — match Document request for final URL
+    status_code = None
+    for req in client._network_requests.values():
+        if (req.get('resource_type') == 'Document'
+                and req.get('url') == current_url
+                and req.get('status') is not None):
+            status_code = req['status']
+            break
+    return {'url': current_url, 'status_code': status_code}
 
 
-async def do_back(client: CDPClient):
+async def do_back(client: CDPClient) -> str:
+    """Go back in history. Returns the URL after navigation."""
     result = await client.send('Page.getNavigationHistory')
     entries = result['result']['entries']
     idx = result['result']['currentIndex']
     if idx > 0:
         await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx - 1]['id']})
         await asyncio.sleep(0.1)
+    return await do_eval(client, 'window.location.href')
 
 
-async def do_forward(client: CDPClient):
+async def do_forward(client: CDPClient) -> str:
+    """Go forward in history. Returns the URL after navigation."""
     result = await client.send('Page.getNavigationHistory')
     entries = result['result']['entries']
     idx = result['result']['currentIndex']
     if idx < len(entries) - 1:
         await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx + 1]['id']})
         await asyncio.sleep(0.1)
+    return await do_eval(client, 'window.location.href')
 
 
 async def do_click(client: CDPClient, selector: str):
@@ -1092,7 +1113,7 @@ async def do_fetch(client: CDPClient, url: str, path: str = None,
     """Compound verb: goto + auto-wait + read in one step.
     Returns read result dict with added nav_ms, wait_ms, read_ms, timed_out."""
     t0 = time.monotonic()
-    await do_navigate(client, url)
+    nav = await do_navigate(client, url)
     nav_ms = round((time.monotonic() - t0) * 1000, 1)
 
     t1 = time.monotonic()
@@ -1104,6 +1125,8 @@ async def do_fetch(client: CDPClient, url: str, path: str = None,
     read_ms = round((time.monotonic() - t2) * 1000, 1)
 
     result['nav_ms'] = nav_ms
+    result['nav_url'] = nav['url']
+    result['nav_status_code'] = nav['status_code']
     result['wait_ms'] = wait_ms
     result['read_ms'] = read_ms
     if not stable:
@@ -1560,7 +1583,10 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
 
         try:
             if verb == 'goto':
-                await do_navigate(client, args[0])
+                nav = await do_navigate(client, args[0])
+                step_info['url'] = nav['url']
+                if nav['status_code'] is not None:
+                    step_info['status_code'] = nav['status_code']
             elif verb == 'click':
                 await do_click(client, args[0])
             elif verb == 'click-text':
@@ -1705,7 +1731,9 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     file_entry['content_type'] = read_result['content_type']
                 files.append(file_entry)
                 step_info['file'] = path
-                step_info['final_url'] = await do_eval(client, 'window.location.href')
+                step_info['url'] = read_result.get('nav_url')
+                if read_result.get('nav_status_code') is not None:
+                    step_info['status_code'] = read_result['nav_status_code']
                 step_info['nav_ms'] = read_result.get('nav_ms')
                 step_info['wait_ms'] = read_result.get('wait_ms')
                 step_info['read_ms'] = read_result.get('read_ms')
@@ -1755,9 +1783,9 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'wait-navigation':
                 await do_wait_navigation(client)
             elif verb == 'back':
-                await do_back(client)
+                step_info['url'] = await do_back(client)
             elif verb == 'forward':
-                await do_forward(client)
+                step_info['url'] = await do_forward(client)
             elif verb == 'eval':
                 result = await do_eval(client, args[0])
                 step_info['result'] = str(result)

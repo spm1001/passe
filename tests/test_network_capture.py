@@ -500,3 +500,36 @@ async def test_capture_first_verb_no_warning(capsys):
 
     stderr = capsys.readouterr().err
     assert 'Warning: capture is not the first verb' not in stderr
+
+
+# ── ensure_network idempotency ────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_ensure_network_does_not_clear_requests():
+    """ensure_network (used by goto) preserves existing network requests."""
+    ws = FakeWS([])
+    client = CDPClient(ws)
+    client._network_enabled = True
+    client._network_requests = {'req1': {'url': 'https://example.com'}}
+
+    await client.ensure_network()
+
+    # Requests preserved — ensure_network skips when already enabled
+    assert 'req1' in client._network_requests
+
+
+@pytest.mark.asyncio
+async def test_enable_network_clears_requests():
+    """enable_network (used by capture) clears existing requests for fresh capture."""
+    ws = FakeWS([])
+    client = CDPClient(ws)
+    client._network_requests = {'req1': {'url': 'https://example.com'}}
+
+    # Mock send to avoid actual WebSocket call
+    from unittest.mock import AsyncMock
+    client.send = AsyncMock(return_value=None)
+    await client.enable_network()
+
+    assert client._network_requests == {}
+    assert client._network_enabled is True
