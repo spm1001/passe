@@ -20,6 +20,7 @@ The 100x speed gap isn't the browser — it's the protocol. MCP needs a model ro
 |------|------|
 | Screenshot a page, interact with it, test it | **passe** |
 | Extract content from any page (articles, SPAs, dashboards) | **passe** `read` (trafilatura primary, Readability.js fallback) |
+| See what API calls a page makes | **passe** `capture` (network request recording to JSONL) |
 | Extract Workspace content (Drive docs, Gmail) | `mise fetch` |
 | Browse with the default Chrome profile interactively | `webctl` |
 | Full Playwright test suites with fixtures and assertions | Playwright directly |
@@ -101,6 +102,9 @@ passe run tests/checkout-flow.passe
 - `eval-file <js-path>` — read JS from a file and evaluate. Use for multi-line JS — avoids minification.
 - `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
+**Network:**
+- `capture [--bodies] <path>` — record all network requests during the script to a JSONL file. Place at the start of a script; writes on script exit. Each line: method, URL, status, content-type, headers, timing. `--bodies` opt-in includes response bodies (large). Step NDJSON summary shows request count, resource type breakdown, domains, and non-2xx errors — read the summary before opening the file.
+
 **Emulation:**
 - `device <"name"> [--dpr N]` — apply device preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` for smaller screenshots.
 - `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
@@ -116,8 +120,10 @@ passe run tests/checkout-flow.passe
 ### Output protocol
 
 - **stderr**: NDJSON per step — `{"i":0,"verb":"goto","ms":342}`
-- **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":["/tmp/out.png"],"final_url":"https://example.com/"}`
+- **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":[{"path":"/tmp/out.png","verb":"screenshot","format":"png","kb":234.5}],"final_url":"https://example.com/"}`
 - **Exit code**: 0 success, 1 failure
+
+`files` entries are objects with `path`, `verb`, and verb-specific metadata (screenshot: `format`/`kb`; read/fetch: `source`/`word_count`/`content_type`; snapshot: `element_count`; eval-to: `byte_size`; capture: `requests`/`by_type`/`domains`/`errors`). Read the summary to decide which files to open.
 
 `final_url` is the page's `window.location.href` captured after the last step, before the tab closes. Use it for post-redirect metadata — this is the only moment the URL is available since the tab is destroyed in `cmd_run`'s finally block.
 
@@ -211,5 +217,9 @@ Single file: `src/passe/cli.py`. The `CDPClient` class handles WebSocket message
 When a `wait_for_event` waiter is active, events go directly to the waiter. When a waiter has timed out (stale cancelled future), `_receiver` falls through to the buffer instead of silently dropping the event. This matters for the `click → wait-navigation` pattern where navigation completes between the click and the wait.
 
 `src/passe/_libs.py` holds all JS constants that run inside Chrome. Third-party vendored: Readability.js (Mozilla) and Turndown.js. Our code: `SHADOW_FLATTEN_JS` (serializes outerHTML with shadow DOM inlined) and `EXTRACT_JS` (orchestrates Readability+Turndown). The primary `read` path gets flattened outerHTML from Chrome and runs trafilatura Python-side; the browser-side libs are the fallback.
+
+### Network capture
+
+`CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. The collector doesn't consume events — they still flow to waiters and queues, allowing future features (wait-idle) to coexist on the same event stream.
 
 No external dependencies beyond `websockets`. Everything else runs in Chrome's V8.

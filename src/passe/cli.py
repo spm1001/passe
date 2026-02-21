@@ -42,6 +42,9 @@ class CDPClient:
         self.receiver_task: asyncio.Task | None = None
         self._target_id: str | None = None
         self._owns_tab: bool = False
+        # Network capture: requestId → merged request/response data
+        self._network_requests: dict[str, dict] = {}
+        self._network_enabled: bool = False
 
     async def start(self):
         self.receiver_task = asyncio.create_task(self._receiver())
@@ -65,6 +68,10 @@ class CDPClient:
                         fut.set_result(msg)
                     continue
                 method = msg.get('method', '')
+                # Network capture — collect before routing (non-consuming,
+                # so waiters and queues still see the event too)
+                if self._network_enabled and method.startswith('Network.'):
+                    self._collect_network_event(method, msg)
                 if method in self.event_waiters:
                     fut = self.event_waiters.pop(method)
                     if not fut.done():
@@ -109,6 +116,64 @@ class CDPClient:
     def unsubscribe(self, method: str):
         """Stop receiving continuous events."""
         self.event_queues.pop(method, None)
+
+    # ── Network capture ──────────────────────────────────
+
+    async def enable_network(self):
+        """Enable Network domain and start collecting requests."""
+        self._network_requests.clear()
+        self._network_enabled = True
+        await self.send('Network.enable')
+
+    async def disable_network(self):
+        """Disable Network domain and stop collecting."""
+        self._network_enabled = False
+        try:
+            await self.send('Network.disable')
+        except (websockets.ConnectionClosed, asyncio.CancelledError):
+            pass
+
+    def get_network_requests(self) -> list[dict]:
+        """Return collected network requests as a list, ordered by timestamp."""
+        return sorted(self._network_requests.values(),
+                      key=lambda r: r.get('timestamp', 0))
+
+    def _collect_network_event(self, method: str, msg: dict):
+        """Buffer a Network domain event, correlating by requestId."""
+        params = msg.get('params', {})
+        request_id = params.get('requestId')
+        if not request_id:
+            return
+
+        if method == 'Network.requestWillBeSent':
+            request = params.get('request', {})
+            self._network_requests[request_id] = {
+                'requestId': request_id,
+                'method': request.get('method'),
+                'url': request.get('url'),
+                'request_headers': dict(request.get('headers', {})),
+                'resource_type': params.get('type'),
+                'timestamp': params.get('timestamp'),
+                'wall_time': params.get('wallTime'),
+            }
+        elif method == 'Network.responseReceived':
+            response = params.get('response', {})
+            if request_id in self._network_requests:
+                self._network_requests[request_id].update({
+                    'status': response.get('status'),
+                    'status_text': response.get('statusText'),
+                    'content_type': response.get('mimeType'),
+                    'response_headers': dict(response.get('headers', {})),
+                    'response_timestamp': params.get('timestamp'),
+                })
+        elif method == 'Network.loadingFinished':
+            if request_id in self._network_requests:
+                self._network_requests[request_id]['completed'] = True
+                self._network_requests[request_id]['encoded_data_length'] = params.get('encodedDataLength')
+        elif method == 'Network.loadingFailed':
+            if request_id in self._network_requests:
+                self._network_requests[request_id]['failed'] = True
+                self._network_requests[request_id]['error_text'] = params.get('errorText')
 
     async def attach_to_first_page(self) -> str:
         """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
@@ -163,6 +228,7 @@ class CDPClient:
 
     async def close_tab(self):
         """Close the tab if we created it. Safe to call during teardown."""
+        self._network_enabled = False
         if self._owns_tab and self._target_id:
             try:
                 await self.send('Target.closeTarget', {'targetId': self._target_id})
@@ -1417,7 +1483,7 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
     'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
-    'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
+    'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log',
 }
@@ -1425,6 +1491,45 @@ KNOWN_VERBS = {
 # Verbs that trigger auto-wait in the next read/fetch step.
 # Keep near KNOWN_VERBS so new navigation verbs don't get forgotten.
 NAV_VERBS = {'goto', 'back', 'forward'}
+
+
+def _build_capture_summary(requests: list[dict]) -> dict:
+    """Build a summary of captured network requests for step NDJSON."""
+    by_type: dict[str, int] = {}
+    domains: set[str] = set()
+    errors: list[dict] = []
+
+    for r in requests:
+        rt = r.get('resource_type', 'Other')
+        by_type[rt] = by_type.get(rt, 0) + 1
+
+        url = r.get('url', '')
+        if '://' in url:
+            domain = url.split('://')[1].split('/')[0].split(':')[0]
+            domains.add(domain)
+
+        status = r.get('status')
+        if status is not None and (status < 200 or status >= 300):
+            errors.append({'url': url, 'status': status})
+        elif r.get('failed'):
+            errors.append({'url': url, 'error': r.get('error_text', 'unknown')})
+
+    summary = {
+        'requests': len(requests),
+        'by_type': by_type,
+        'domains': sorted(domains),
+    }
+    if errors:
+        summary['errors'] = errors
+    return summary
+
+
+def _write_capture_jsonl(path: str, requests: list[dict]) -> int:
+    """Write captured requests to JSONL file. Returns bytes written."""
+    with open(path, 'w') as f:
+        for r in requests:
+            f.write(json.dumps(r, default=str) + '\n')
+    return os.path.getsize(path)
 
 
 async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> dict:
@@ -1435,6 +1540,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
     failed_at = None
     fail_verb = None
     fail_error = None
+    capture_path = None  # set by 'capture' verb
+    capture_bodies = False  # --bodies flag on capture verb
 
     prev_verb = None
 
@@ -1518,12 +1625,15 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 step_info['kb'] = info['kb']
                 step_info['format'] = info['format']
                 step_info['breakdown'] = info['breakdown']
-                files.append(info['file'])
+                files.append({'path': info['file'], 'verb': 'screenshot',
+                              'format': info['format'], 'kb': info['kb']})
             elif verb == 'snapshot':
                 path = args[0] if args else None
                 text = await do_snapshot(client, path)
                 if path:
-                    files.append(path)
+                    element_count = len(text.strip().splitlines()) if text.strip() else 0
+                    files.append({'path': path, 'verb': 'snapshot',
+                                  'element_count': element_count})
                 else:
                     step_info['result'] = text[:200]
             elif verb == 'read':
@@ -1551,7 +1661,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 path = read_args[0] if read_args else None
                 read_result = await do_read(client, path, force_source=force_source)
                 if path:
-                    files.append(path)
+                    md = read_result.get('markdown', '')
+                    file_entry = {'path': path, 'verb': 'read',
+                                  'source': read_result.get('source'),
+                                  'word_count': len(md.split()) if md else 0}
+                    if read_result.get('content_type'):
+                        file_entry['content_type'] = read_result['content_type']
+                    files.append(file_entry)
                 else:
                     step_info['result'] = read_result['markdown'][:200]
                 if read_result.get('warning'):
@@ -1581,7 +1697,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
                     os.close(fd)
                 read_result = await do_fetch(client, url, path, force_source=force_source)
-                files.append(path)
+                md = read_result.get('markdown', '')
+                file_entry = {'path': path, 'verb': 'fetch',
+                              'source': read_result.get('source'),
+                              'word_count': len(md.split()) if md else 0}
+                if read_result.get('content_type'):
+                    file_entry['content_type'] = read_result['content_type']
+                files.append(file_entry)
                 step_info['file'] = path
                 step_info['final_url'] = await do_eval(client, 'window.location.href')
                 step_info['nav_ms'] = read_result.get('nav_ms')
@@ -1641,17 +1763,28 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 step_info['result'] = str(result)
             elif verb == 'eval-to':
                 await do_eval_to(client, args[0], args[1])
-                files.append(args[0])
+                files.append({'path': args[0], 'verb': 'eval-to',
+                              'byte_size': os.path.getsize(args[0])})
             elif verb == 'eval-file':
                 result = await do_eval_file(client, args[0])
                 step_info['result'] = str(result)[:200]
             elif verb == 'eval-file-to':
                 await do_eval_file_to(client, args[0], args[1])
-                files.append(args[0])
+                files.append({'path': args[0], 'verb': 'eval-file-to',
+                              'byte_size': os.path.getsize(args[0])})
             elif verb == 'assert':
                 await do_assert(client, args[0])
             elif verb == 'log':
                 print(f'[log] {args[0]}', file=sys.stderr)
+            elif verb == 'capture':
+                cap_args = list(args)
+                if '--bodies' in cap_args:
+                    capture_bodies = True
+                    cap_args.remove('--bodies')
+                if not cap_args:
+                    raise RuntimeError('capture requires an output path')
+                capture_path = cap_args[0]
+                await client.enable_network()
 
             step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
             prev_verb = verb
@@ -1667,6 +1800,39 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             break
 
         print(json.dumps(step_info), file=sys.stderr)
+
+    # Finalize network capture — write JSONL and emit summary step
+    if capture_path is not None:
+        requests = client.get_network_requests()
+        # Fetch response bodies if --bodies was set
+        if capture_bodies:
+            total_body_bytes = 0
+            for r in requests:
+                if not r.get('completed'):
+                    continue
+                try:
+                    body_result = await client.send('Network.getResponseBody', {
+                        'requestId': r['requestId'],
+                    })
+                    body_data = body_result.get('result', {})
+                    body = body_data.get('body', '')
+                    is_base64 = body_data.get('base64Encoded', False)
+                    r['body'] = body
+                    r['body_base64'] = is_base64
+                    r['body_size'] = len(base64.b64decode(body)) if is_base64 else len(body)
+                    total_body_bytes += r['body_size']
+                except Exception:
+                    pass  # Body may not be available (e.g. streamed, evicted)
+        _write_capture_jsonl(capture_path, requests)
+        cap_summary = _build_capture_summary(requests)
+        if capture_bodies:
+            cap_summary['body_bytes'] = total_body_bytes
+        file_entry = {'path': capture_path, 'verb': 'capture'}
+        file_entry.update(cap_summary)
+        files.append(file_entry)
+        cap_step = {'verb': 'capture', 'file': capture_path}
+        cap_step.update(cap_summary)
+        print(json.dumps(cap_step), file=sys.stderr)
 
     total_ms = round((time.monotonic() - total_t0) * 1000, 1)
     summary = {
@@ -1861,6 +2027,9 @@ Observation:
   eval-to <path> <expr>     Run JS, write result to file
   eval-file <js-path>       Run JS from file
   eval-file-to <out> <js>   Run JS from file, write to file
+
+Network:
+  capture [--bodies] <path> Record all network requests to JSONL file
 
 Emulation:
   device <"name"> [--dpr N] Apply device preset (iPhone 14 Pro, Pixel 7, etc.)
