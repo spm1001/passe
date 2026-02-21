@@ -23,6 +23,7 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 |------|------|
 | Screenshot, interact, test a page | **passe** |
 | Extract content from any web page | **passe** `read` (trafilatura primary, Readability fallback, shadow DOM flattened) |
+| See what API calls a page makes | **passe** `capture` (network requests to JSONL) |
 | Extract Google Workspace content (Drive, Gmail) | `mise fetch` |
 | Full test suites with fixtures | Playwright directly |
 
@@ -95,6 +96,9 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
 - `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
+**Network:**
+- `capture [--bodies] <path>` — record all network requests to JSONL. Place at script start; writes on exit. Step NDJSON summary: count, by_type, domains, errors. `--bodies` includes response bodies (large, opt-in).
+
 **Emulation:**
 - `device <"name"> [--dpr N]` — apply device emulation preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` overrides DPR for smaller screenshots.
 - `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
@@ -108,8 +112,10 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 ## Output protocol
 
 **stderr:** NDJSON per step — `{"i":0,"verb":"goto","ms":342}`
-**stdout:** summary — `{"ok":true,"steps":6,"total_ms":443,"files":["/tmp/out.png"]}`
+**stdout:** summary — `{"ok":true,"steps":6,"total_ms":443,"files":[{"path":"/tmp/out.png","verb":"screenshot","format":"png","kb":234.5}]}`
 **Exit code:** 0 success, 1 failure
+
+`files` entries are objects with `path`, `verb`, and verb-specific metadata — read the summary to decide which files to open.
 
 ## Content extraction: `read` vs `eval`
 
@@ -183,6 +189,31 @@ wait 500
 read /tmp/content.md
 EOF
 ```
+
+## Reverse-engineering APIs with `capture`
+
+`capture` records all network requests during a script to JSONL. Place it at the start — it writes on script exit.
+
+```bash
+# Discover what API calls a page makes
+passe run - <<'EOF'
+capture /tmp/reqs.jsonl
+goto https://spa.example.com
+click-text "Search"
+type "#query" "parental leave"
+press Enter
+wait 2000
+EOF
+```
+
+The stderr summary tells you the shape without reading the file:
+```json
+{"verb":"capture","file":"/tmp/reqs.jsonl","requests":47,"by_type":{"XHR":3,"Script":15,"Image":27},"domains":["api.example.com","cdn.example.com"]}
+```
+
+Then grep for the API calls: `grep '"XHR"' /tmp/reqs.jsonl`. Use `--bodies` to include response payloads (large — opt-in).
+
+**The pattern:** capture → identify the API endpoint → call it directly via `eval` + `fetch()` using the authenticated API pattern. Skip the UI entirely.
 
 ## Smoke tests with `assert`
 
