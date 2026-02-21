@@ -5,7 +5,9 @@ description: >
   `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
   conventions that prevent malformed scripts and wasted round-trips. Triggers on
   'passe run', 'automate the browser', 'screenshot a page', 'interact with a website',
-  'click a button on', 'fill a form on', 'scrape this page', 'test this page'.
+  'click a button on', 'fill a form on', 'scrape this page', 'test this page',
+  'capture network requests', 'what API calls does this page make',
+  'reverse-engineer API', 'record network traffic', 'inspect HTTP requests'.
   For clean article/blog extraction use mise fetch; for DOM-faithful extraction
   (tables, code blocks, technical docs) use passe read. (user)
 requires:

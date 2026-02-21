@@ -1777,6 +1777,11 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'log':
                 print(f'[log] {args[0]}', file=sys.stderr)
             elif verb == 'capture':
+                if i > 0:
+                    print('[capture] Warning: capture is not the first verb — '
+                          'network requests from earlier steps were not recorded. '
+                          'Place capture at the start of your script.',
+                          file=sys.stderr)
                 cap_args = list(args)
                 if '--bodies' in cap_args:
                     capture_bodies = True
