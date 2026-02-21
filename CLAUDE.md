@@ -37,7 +37,20 @@ If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-d
 
 **Never assume you have auth unless you've confirmed Chrome is Sameer's daily driver instance.**
 
-### Remote Chrome from kube
+### Local headless Chrome on kube
+
+Headless Chromium runs as a systemd user service (`chromium-cdp.service`) on port 9222. GPU acceleration is enabled via `--ignore-gpu-blocklist --use-angle=vulkan` — ANGLE falls through to OpenGL EGL on the GTX 1650. Without these flags, Chrome uses SwiftShader software rendering and full-page screenshots of dense pages take 60–136s instead of 2s.
+
+```
+# Service: ~/.config/systemd/user/chromium-cdp.service
+ExecStart=/usr/bin/chromium --headless=new --remote-debugging-port=9222 --no-sandbox \
+  --no-first-run --no-default-browser-check --user-data-dir=%h/.chromium-cdp \
+  --ignore-gpu-blocklist --use-angle=vulkan
+```
+
+`PASSE_CDP` in `.bashrc` points at the Mac Chrome via tailscale, not this local instance. To use local headless: `PASSE_CDP=http://localhost:9222 passe run ...`
+
+### Remote Chrome from kube (Mac via tailscale)
 
 Chrome Debug on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--remote-debugging-address=0.0.0.0`). Kube reaches it via `tailscale serve`:
 
