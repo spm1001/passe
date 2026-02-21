@@ -45,6 +45,8 @@ class CDPClient:
         # Network capture: requestId → merged request/response data
         self._network_requests: dict[str, dict] = {}
         self._network_enabled: bool = False
+        self._inflight_count: int = 0
+        self._network_idle_event: asyncio.Event = asyncio.Event()
 
     async def start(self):
         self.receiver_task = asyncio.create_task(self._receiver())
@@ -128,6 +130,8 @@ class CDPClient:
     async def enable_network(self):
         """Enable Network domain and start a fresh capture (clears requests)."""
         self._network_requests.clear()
+        self._inflight_count = 0
+        self._network_idle_event.set()
         self._network_enabled = True
         await self.send('Network.enable')
 
@@ -162,6 +166,8 @@ class CDPClient:
                 'timestamp': params.get('timestamp'),
                 'wall_time': params.get('wallTime'),
             }
+            self._inflight_count += 1
+            self._network_idle_event.clear()
         elif method == 'Network.responseReceived':
             response = params.get('response', {})
             if request_id in self._network_requests:
@@ -176,10 +182,16 @@ class CDPClient:
             if request_id in self._network_requests:
                 self._network_requests[request_id]['completed'] = True
                 self._network_requests[request_id]['encoded_data_length'] = params.get('encodedDataLength')
+            self._inflight_count = max(0, self._inflight_count - 1)
+            if self._inflight_count == 0:
+                self._network_idle_event.set()
         elif method == 'Network.loadingFailed':
             if request_id in self._network_requests:
                 self._network_requests[request_id]['failed'] = True
                 self._network_requests[request_id]['error_text'] = params.get('errorText')
+            self._inflight_count = max(0, self._inflight_count - 1)
+            if self._inflight_count == 0:
+                self._network_idle_event.set()
 
     async def attach_to_first_page(self) -> str:
         """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
@@ -409,6 +421,50 @@ async def do_forward(client: CDPClient) -> str:
         await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx + 1]['id']})
         await asyncio.sleep(0.1)
     return await do_eval(client, 'window.location.href')
+
+
+async def do_wait_idle(client: CDPClient, timeout_ms: int = 30000,
+                       debounce_ms: int = 500) -> dict:
+    """Wait until network requests settle (in-flight count at zero for debounce_ms).
+
+    Returns {'settled_after_ms': N, 'timed_out': bool}.
+    """
+    await client.ensure_network()
+    deadline = time.monotonic() + timeout_ms / 1000
+    settled_start = None
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {'settled_after_ms': timeout_ms, 'timed_out': True}
+
+        if client._inflight_count == 0:
+            if settled_start is None:
+                settled_start = time.monotonic()
+            elapsed_idle = (time.monotonic() - settled_start) * 1000
+            if elapsed_idle >= debounce_ms:
+                return {
+                    'settled_after_ms': round(
+                        (time.monotonic() - (deadline - timeout_ms / 1000)) * 1000, 1
+                    ),
+                    'timed_out': False,
+                }
+            # Sleep a short interval, then re-check
+            wait_time = min((debounce_ms - elapsed_idle) / 1000, remaining)
+            client._network_idle_event.clear()
+            client._network_idle_event.set()  # Already idle, just need to sleep
+            await asyncio.sleep(min(wait_time, 0.05))
+        else:
+            # Requests in flight — wait for idle event or timeout
+            settled_start = None
+            try:
+                client._network_idle_event.clear()
+                await asyncio.wait_for(
+                    client._network_idle_event.wait(),
+                    timeout=min(remaining, 1.0)
+                )
+            except asyncio.TimeoutError:
+                pass
 
 
 async def do_click(client: CDPClient, selector: str):
@@ -1506,7 +1562,7 @@ def parse_script(text: str) -> list[tuple[str, list[str]]]:
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
     'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
-    'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-navigation',
+    'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle', 'wait-navigation',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log',
 }
@@ -1780,6 +1836,14 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'wait-for':
                 timeout = int(args[1]) if len(args) > 1 else 10000
                 await do_wait_for(client, args[0], timeout)
+            elif verb == 'wait-idle':
+                timeout = int(args[0]) if args else 30000
+                idle_result = await do_wait_idle(client, timeout_ms=timeout)
+                step_info['settled_after_ms'] = idle_result['settled_after_ms']
+                if idle_result['timed_out']:
+                    step_info['timed_out'] = True
+                    print(f'[wait-idle] Timed out after {timeout}ms — '
+                          f'network did not settle', file=sys.stderr)
             elif verb == 'wait-navigation':
                 await do_wait_navigation(client)
             elif verb == 'back':
@@ -2071,6 +2135,7 @@ Emulation:
 Control:
   wait <ms>                 Sleep
   wait-for <sel> [timeout]  Wait for selector (default 10s)
+  wait-idle [timeout]       Wait for network to settle (default 30s)
   wait-navigation           Wait for page load event
   watch [flags] <path>      Auto-screenshot on HMR/DOM changes. --fast, --cooldown <ms> (default 1000)
   assert <expression>       Fail script if JS expression is falsy

@@ -106,7 +106,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
 
 **Control:**
-- `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-navigation`
+- `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-idle [timeout_ms]` (network settles — replaces guessed waits), `wait-navigation`
 - `watch [--fast] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Debounces 100ms, screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
 - `assert <expression>` — fail script if falsy. Sub-millisecond.
 - `log <message>` — print to stderr
@@ -299,7 +299,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
-- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). Only use explicit `wait` or `wait-for` for SPAs where you need a specific element to appear after a click.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use `wait-idle` (waits for network to settle) or `wait-for <selector>` for a specific element. `wait-idle` is the better default — it's deterministic and replaces guessed delays.
 - **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
 ## Atomic commands
