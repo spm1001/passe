@@ -91,7 +91,8 @@ class CDPClient:
         except asyncio.CancelledError:
             pass
 
-    async def send(self, method: str, params: dict = None) -> dict:
+    async def send(self, method: str, params: dict = None,
+                   timeout: float = 15.0) -> dict:
         self.msg_id += 1
         msg = {'id': self.msg_id, 'method': method, 'params': params or {}}
         if self.session_id:
@@ -99,7 +100,7 @@ class CDPClient:
         fut = asyncio.get_event_loop().create_future()
         self.pending[self.msg_id] = fut
         await self.ws.send(json.dumps(msg))
-        return await asyncio.wait_for(fut, timeout=15.0)
+        return await asyncio.wait_for(fut, timeout=timeout)
 
     async def wait_for_event(self, method: str, timeout: float = 15.0) -> dict:
         # Check buffer first — the event may have fired before we started waiting
