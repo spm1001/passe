@@ -790,7 +790,11 @@ async def do_screenshot(client: CDPClient, path: str = None,
         }
         params['captureBeyondViewport'] = True
 
-    result = await client.send('Page.captureScreenshot', params)
+    # Screenshot rasterisation can be slow on software-rendered headless Chrome:
+    # Wikipedia Cat (765×16384, DPR=1) takes 66s on --disable-gpu with 2 raster
+    # threads.  Use a generous timeout so we only fire on a dead browser, not on
+    # a page that's legitimately large.
+    result = await client.send('Page.captureScreenshot', params, timeout=300.0)
     capture_ms = round((time.monotonic() - t0) * 1000, 1)
 
     t1 = time.monotonic()
