@@ -78,8 +78,8 @@ passe run tests/checkout-flow.passe
 ### Verb reference
 
 **Navigation:**
-- `goto <url>` — navigate and wait for load
-- `back` / `forward` — browser history
+- `goto <url>` — navigate and wait for load. Step NDJSON includes `url` (final URL after redirects) and `status_code` (HTTP status, e.g. 200, 301, 403). No need for `eval window.location.href` — goto tells you where you landed.
+- `back` / `forward` — browser history. Step NDJSON includes `url` (page URL after navigation).
 - `scroll <x> <y>` — window.scrollTo
 
 **Interaction:**
@@ -119,7 +119,7 @@ passe run tests/checkout-flow.passe
 
 ### Output protocol
 
-- **stderr**: NDJSON per step — `{"i":0,"verb":"goto","ms":342}`
+- **stderr**: NDJSON per step — `{"i":0,"verb":"goto","ms":342,"url":"https://example.com/","status_code":200}`
 - **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":[{"path":"/tmp/out.png","verb":"screenshot","format":"png","kb":234.5}],"final_url":"https://example.com/"}`
 - **Exit code**: 0 success, 1 failure
 
