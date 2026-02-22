@@ -276,7 +276,7 @@ def _extract_flag(args: list[str], flag: str) -> tuple[str | None, list[str]]:
 
 def _cdp_base_url():
     """Get CDP base URL from --cdp flag, PASSE_CDP env var, or default to localhost:9222."""
-    return _cdp_override or os.environ.get('PASSE_CDP', 'http://localhost:9222')
+    return _cdp_override or os.environ.get('PASSE_CDP', '').strip() or 'http://localhost:9222'
 
 
 def _chrome_running() -> bool:
@@ -378,7 +378,7 @@ async def connect(port=9222):
     """
     base_url = _cdp_base_url()
     is_remote = not _is_loopback(base_url)
-    cdp_explicit = _cdp_override is not None or 'PASSE_CDP' in os.environ
+    cdp_explicit = _cdp_override is not None or bool(os.environ.get('PASSE_CDP', '').strip())
     chrome_proc = None
     if not _chrome_running():
         if is_remote:
