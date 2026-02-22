@@ -92,8 +92,13 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def spa_server():
-    """Start a local HTTP server serving the SPA fixture."""
+def spa_server(monkeypatch):
+    """Start a local HTTP server serving the SPA fixture.
+
+    Clears PASSE_CDP so tests connect to local Chrome (a remote Chrome
+    can't reach our localhost server).
+    """
+    monkeypatch.delenv('PASSE_CDP', raising=False)
     server = HTTPServer(('127.0.0.1', 0), _Handler)
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
@@ -102,7 +107,6 @@ def spa_server():
     server.shutdown()
 
 
-@pytest.mark.xfail(reason="Headless Chromium on kube cannot reach localhost/127.0.0.1")
 @pytest.mark.asyncio
 async def test_spa_extraction_succeeds(spa_server):
     """Read a client-rendered SPA — trafilatura should extract the article content."""
