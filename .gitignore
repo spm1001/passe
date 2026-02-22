@@ -1,2 +1,5 @@
 node_modules/
 package-lock.json
+chrome-debug/chrome-debug
+chrome-debug/chrome-debug-arm64
+chrome-debug/chrome-debug-x86_64

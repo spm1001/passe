@@ -20,41 +20,55 @@ Chrome Debug solves this by being a completely separate Chrome instance:
 └── Contents/
     ├── Info.plist          # App identity + URL scheme registration
     ├── MacOS/
-    │   └── launch.sh       # Shell wrapper that launches Chrome with flags
+    │   ├── chrome-debug    # Native handler (CFBundleExecutable)
+    │   └── launch.sh       # Manual CLI utility (bash, kept for direct use)
     └── Resources/
         └── app.icns        # App icon
 ```
 
-### launch.sh
+### chrome-debug (native handler)
+
+The primary executable. A compiled Swift binary (~140 lines, source in `passe/chrome-debug/handler.swift`) that acts as a proper macOS `NSApplication`. This is what macOS runs when you launch Chrome Debug from the Dock, Spotlight, or when it dispatches a URL/file.
+
+**Why native?** Bash can't receive macOS Apple Events (`odoc` for files, `GURL` for URLs). When Chrome Debug is the default browser and you double-click an HTML file or click a link in another app, macOS sends an Apple Event to the running Chrome Debug.app. A bash executable silently drops it — the URL never opens. The native handler receives these events and forwards them to Chrome.
+
+**What it does:**
+
+| Event | Trigger | Handler |
+|-------|---------|---------|
+| `application:openFiles:` | Double-click .html in Finder, "Open With" | Batch file open via Chrome singleton |
+| `kAEGetURL` | Click URL in Slack, Mail, Notes, etc. | URL open via Chrome singleton |
+| `applicationShouldHandleReopen:` | Click Chrome Debug in Dock | Brings Chrome window to front |
+| `applicationDidFinishLaunching:` | First launch | Starts Chrome with debug flags |
+| `on idle` (5s timer) | Ongoing | Quits handler when Chrome exits |
+
+**Re-entry detection** uses Chrome's `SingletonLock` (a symlink encoding the PID). When Chrome is alive, URLs are handed off via `--user-data-dir` only — Chrome's singleton IPC delivers them to the existing instance. When the lock is stale or absent, Chrome is launched with full debug flags.
+
+**First-launch race:** When Chrome Debug launches and immediately receives a file open event, Chrome may not have established its `SingletonLock` yet. The `launchedByUs` flag handles this — if we just started Chrome, URLs are handed off via singleton regardless of lock state (Chrome's own IPC handles the brief race).
+
+**Building and installing:**
 
 ```bash
-#!/bin/bash
-CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-PROFILE="$HOME/.chrome-debug"
-
-# Re-entry guard: if Chrome Debug is already running, hand off the URL
-# via Chrome's singleton mechanism instead of spawning a second process.
-if [ -L "$PROFILE/SingletonLock" ]; then
-    lock_target=$(readlink "$PROFILE/SingletonLock" 2>/dev/null)
-    pid="${lock_target##*-}"
-    if kill -0 "$pid" 2>/dev/null; then
-        [ $# -gt 0 ] && "$CHROME" --user-data-dir="$PROFILE" "$@"
-        exit 0
-    fi
-fi
-
-# First launch — start with full debugging flags.
-"$CHROME" \
-    --remote-debugging-port=9222 \
-    --remote-debugging-address=0.0.0.0 \
-    --remote-allow-origins=* \
-    --user-data-dir="$PROFILE" \
-    --no-default-browser-check \
-    "$@" &
-wait
+cd ~/Repos/passe/chrome-debug
+make            # Compiles universal binary (arm64 + x86_64), ad-hoc signs
+make install    # Backs up Info.plist, copies binary, updates CFBundleExecutable, re-registers
 ```
 
-Key flags:
+### launch.sh (manual CLI utility)
+
+Still available at `Contents/MacOS/launch.sh` for direct command-line use. Useful for debugging or launching Chrome Debug outside of macOS app dispatch.
+
+```bash
+# Launch Chrome Debug from the terminal
+~/Applications/Chrome\ Debug.app/Contents/MacOS/launch.sh
+
+# Open a URL directly
+~/Applications/Chrome\ Debug.app/Contents/MacOS/launch.sh https://example.com
+```
+
+Includes a re-entry guard (SingletonLock PID check) so running it while Chrome Debug is already running hands off the URL cleanly instead of spawning a second Chrome process.
+
+Key Chrome flags (used by both the native handler and launch.sh):
 
 | Flag | Purpose |
 |------|---------|
@@ -63,11 +77,6 @@ Key flags:
 | `--remote-allow-origins=*` | Allows CDP connections from any origin |
 | `--user-data-dir=~/.chrome-debug` | Completely separate profile, cookies, extensions, history |
 | `--no-default-browser-check` | Suppresses the "set as default?" nag on launch |
-| `"$@"` | Passes through URL arguments so macOS can open links in it |
-
-The re-entry guard checks Chrome's `SingletonLock` (a symlink encoding the PID of the running Chrome process). When Chrome is alive, we hand off the URL with just `--user-data-dir` — Chrome's singleton IPC delivers it to the existing instance and exits. No debug port flag on re-entry (it's already bound on the running instance).
-
-Without this guard, macOS re-launching Chrome Debug.app to open a URL would spawn a second Chrome process fighting over port 9222.
 
 ### Info.plist
 
@@ -88,77 +97,25 @@ Without the URL scheme registration, macOS has no way to know the app handles we
 mkdir -p ~/Applications/Chrome\ Debug.app/Contents/{MacOS,Resources}
 ```
 
-2. **Write `launch.sh`** at `Contents/MacOS/launch.sh` with the content above, then make it executable:
+2. **Build and install the native handler:**
 
 ```bash
-chmod +x ~/Applications/Chrome\ Debug.app/Contents/MacOS/launch.sh
+cd ~/Repos/passe/chrome-debug
+make && make install
 ```
 
-3. **Create `Info.plist`** at `Contents/Info.plist`:
+This compiles `handler.swift` into a universal binary, ad-hoc signs it, copies it to `Contents/MacOS/chrome-debug`, updates `Info.plist` to use it as `CFBundleExecutable`, and re-registers with Launch Services.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>launch.sh</string>
-    <key>CFBundleIconFile</key>
-    <string>app</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.modha.chrome-debug</string>
-    <key>CFBundleName</key>
-    <string>Chrome Debug</string>
-    <key>CFBundleDisplayName</key>
-    <string>Chrome Debug</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleVersion</key>
-    <string>1.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>12.0</string>
-    <key>LSArchitecturePriority</key>
-    <array>
-        <string>arm64</string>
-        <string>x86_64</string>
-    </array>
-    <key>CFBundleURLTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleURLName</key>
-            <string>Web URL</string>
-            <key>CFBundleURLSchemes</key>
-            <array>
-                <string>http</string>
-                <string>https</string>
-            </array>
-        </dict>
-    </array>
-    <key>CFBundleDocumentTypes</key>
-    <array>
-        <dict>
-            <key>CFBundleTypeName</key>
-            <string>HTML Document</string>
-            <key>CFBundleTypeRole</key>
-            <string>Viewer</string>
-            <key>LSItemContentTypes</key>
-            <array>
-                <string>public.html</string>
-                <string>public.xhtml</string>
-                <string>public.url</string>
-            </array>
-        </dict>
-    </array>
-</dict>
-</plist>
+3. **Copy `launch.sh`** to `Contents/MacOS/launch.sh` (optional, for manual CLI use):
+
+```bash
+cp ~/Repos/passe/chrome-debug/launch.sh ~/Applications/Chrome\ Debug.app/Contents/MacOS/
+chmod +x ~/Applications/Chrome\ Debug.app/Contents/MacOS/launch.sh
 ```
 
 4. **Add an icon** (optional). Export a `.icns` file as `Contents/Resources/app.icns`. Without it the app gets a generic icon.
 
-5. **Register with Launch Services:**
+5. **Register with Launch Services** (already done by `make install`, but if needed manually):
 
 ```bash
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ~/Applications/Chrome\ Debug.app
@@ -186,17 +143,16 @@ Another Chrome instance (or a previous crash) is holding the port. Find it with 
 The `--user-data-dir` flag gives Chrome Debug its own profile directory. Nothing is shared with `/Users/you/Library/Application Support/Google/Chrome/`. Install extensions separately in Chrome Debug if needed.
 
 **"Open using Rosetta" keeps getting set**
-Because the bundle's executable is a shell script (`launch.sh`), macOS can't determine its architecture and sometimes defaults to marking it for Rosetta translation. This is wasteful on Apple Silicon — Chrome itself is a universal binary and runs natively as arm64. The `LSArchitecturePriority` key in the plist tells macOS to prefer arm64, which should prevent the checkbox from appearing. If it gets set anyway (Get Info > "Open using Rosetta"), uncheck it. You can also clear it from the command line:
+The native handler is a universal binary (arm64 + x86_64), so this should not occur. If it does (Get Info > "Open using Rosetta"), uncheck it and clear the override:
 
 ```bash
-# Check current state
-xattr -p com.apple.LaunchServices ~/Applications/Chrome\ Debug.app 2>/dev/null
-
-# Remove Rosetta override if set
 xattr -d com.apple.LaunchServices ~/Applications/Chrome\ Debug.app 2>/dev/null
 ```
 
 Re-run `lsregister -f` afterwards to ensure the registration is clean.
 
 **"Chrome is already running" conflicts**
-macOS can run multiple Chrome instances with different `--user-data-dir` values simultaneously. Chrome Debug and regular Chrome coexist without issues. Opening a URL/file while Chrome Debug is already running is handled by the re-entry guard in `launch.sh` — it detects the running instance and hands off via Chrome's singleton IPC instead of spawning a conflicting second process.
+macOS can run multiple Chrome instances with different `--user-data-dir` values simultaneously. Chrome Debug and regular Chrome coexist without issues. Opening a URL/file while Chrome Debug is already running is handled by the native handler — it receives the Apple Event and hands off to Chrome via singleton IPC.
+
+**Two Chrome dock icons**
+Chrome Debug (the native handler) and Google Chrome (the browser process) each create their own dock presence. When regular Chrome is also running, Chrome Debug's Chrome instance merges with regular Chrome's dock icon — you see Chrome Debug + Chrome (two icons, same as before). When regular Chrome is _not_ running, Chrome Debug's Chrome appears as a separate "Google Chrome" icon. This is a macOS limitation — Chrome always creates its own `NSApplication`. Tracked as a known issue.
