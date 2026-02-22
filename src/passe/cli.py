@@ -307,8 +307,11 @@ def _find_chrome() -> str:
     return None
 
 
-def _start_chrome(port=9222):
-    """Launch Chrome with debug profile if not running. Only works locally."""
+def _start_chrome(port=9222, headless=False):
+    """Launch Chrome with debug profile if not running. Only works locally.
+
+    Returns the Popen process if headless (caller owns teardown), else None.
+    """
     import subprocess
     from pathlib import Path
     chrome_path = _find_chrome()
@@ -319,14 +322,19 @@ def _start_chrome(port=9222):
             file=sys.stderr,
         )
         sys.exit(1)
-    print(f"Starting Chrome Debug ({os.path.basename(chrome_path)})...", file=sys.stderr)
+    cmd = [
+        chrome_path,
+        f'--remote-debugging-port={port}',
+        '--user-data-dir=' + str(Path.home() / '.chrome-debug'),
+        '--no-default-browser-check',
+    ]
+    if headless:
+        cmd.append('--headless=new')
+    label = 'headless Chrome' if headless else 'Chrome Debug'
+    print(f"[passe] starting {label} ({os.path.basename(chrome_path)})...", file=sys.stderr)
     try:
-        subprocess.Popen(
-            [chrome_path,
-             f'--remote-debugging-port={port}',
-             '--user-data-dir=' + str(Path.home() / '.chrome-debug'),
-             '--no-default-browser-check'],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
     except FileNotFoundError:
         print(
@@ -338,10 +346,10 @@ def _start_chrome(port=9222):
         sys.exit(1)
     for _ in range(30):
         if _chrome_running():
-            print("Chrome Debug started.", file=sys.stderr)
-            return
+            print(f"[passe] {label} started (pid {proc.pid}).", file=sys.stderr)
+            return proc if headless else None
         time.sleep(0.5)
-    print("Failed to start Chrome Debug.", file=sys.stderr)
+    print(f"[passe] failed to start {label}.", file=sys.stderr)
     sys.exit(1)
 
 
@@ -365,10 +373,13 @@ def _is_loopback(url: str) -> bool:
 async def connect(port=9222):
     """Connect to Chrome, starting it if needed. Return (websocket, CDPClient, info).
 
-    info dict contains: cdp (base URL), browser (version string), remote (bool).
+    info dict contains: cdp (base URL), browser (version string), remote (bool),
+    and optionally _process (Popen) if we auto-launched headless Chrome.
     """
     base_url = _cdp_base_url()
     is_remote = not _is_loopback(base_url)
+    cdp_explicit = _cdp_override is not None or 'PASSE_CDP' in os.environ
+    chrome_proc = None
     if not _chrome_running():
         if is_remote:
             print(
@@ -378,7 +389,10 @@ async def connect(port=9222):
                 file=sys.stderr,
             )
             sys.exit(1)
-        _start_chrome(port)
+        # Auto-launch: headless when no explicit CDP target (passe owns it),
+        # GUI when user explicitly pointed at localhost (they want Chrome Debug)
+        headless = not cdp_explicit
+        chrome_proc = _start_chrome(port, headless=headless)
     with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
         version_info = json.loads(resp.read())
     ws_url = version_info['webSocketDebuggerUrl']
@@ -400,8 +414,26 @@ async def connect(port=9222):
     ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
     client = CDPClient(ws)
     await client.start()
-    conn_info = {'cdp': base_url, 'browser': browser_str, 'remote': is_remote}
+    conn_info = {
+        'cdp': base_url, 'browser': browser_str, 'remote': is_remote,
+        '_process': chrome_proc,
+    }
     return ws, client, conn_info
+
+
+def _teardown_chrome(conn_info: dict):
+    """Kill auto-launched headless Chrome if we own it."""
+    proc = conn_info.get('_process')
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 # ── Actions ───────────────────────────────────────────────
@@ -2044,6 +2076,7 @@ async def cmd_run(source: str, inline: str = None,
             await client.close_tab()
         await client.stop()
         await ws.close()
+        _teardown_chrome(conn_info)
 
 
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
@@ -2070,7 +2103,7 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
         optimize = True
         viewport_only = True
     output = args[0] if args else None
-    ws, client, _conn_info = await connect()
+    ws, client, conn_info = await connect()
     try:
         await client.attach_to_first_page()
         if device:
@@ -2084,11 +2117,12 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
     finally:
         await client.stop()
         await ws.close()
+        _teardown_chrome(conn_info)
 
 
 async def cmd_eval(expression: str):
     """Atomic JS eval on current page."""
-    ws, client, _conn_info = await connect()
+    ws, client, conn_info = await connect()
     try:
         await client.attach_to_first_page()
         result = await do_eval(client, expression)
@@ -2096,6 +2130,7 @@ async def cmd_eval(expression: str):
     finally:
         await client.stop()
         await ws.close()
+        _teardown_chrome(conn_info)
 
 
 def cmd_devices():
