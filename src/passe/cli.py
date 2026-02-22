@@ -345,10 +345,30 @@ def _start_chrome(port=9222):
     sys.exit(1)
 
 
+def _is_loopback(url: str) -> bool:
+    """Check if a CDP URL points to a loopback address."""
+    from urllib.parse import urlparse
+    import socket
+    hostname = urlparse(url).hostname or ''
+    if hostname in ('localhost', '127.0.0.1', '::1', '0.0.0.0'):
+        return True
+    try:
+        addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+        return all(
+            ai[4][0].startswith('127.') or ai[4][0] == '::1'
+            for ai in addr_info
+        )
+    except socket.gaierror:
+        return False
+
+
 async def connect(port=9222):
-    """Connect to Chrome, starting it if needed. Return (websocket, CDPClient)."""
+    """Connect to Chrome, starting it if needed. Return (websocket, CDPClient, info).
+
+    info dict contains: cdp (base URL), browser (version string), remote (bool).
+    """
     base_url = _cdp_base_url()
-    is_remote = 'localhost' not in base_url and '127.0.0.1' not in base_url
+    is_remote = not _is_loopback(base_url)
     if not _chrome_running():
         if is_remote:
             print(
@@ -360,18 +380,28 @@ async def connect(port=9222):
             sys.exit(1)
         _start_chrome(port)
     with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
-        ws_url = json.loads(resp.read())['webSocketDebuggerUrl']
-    # When connecting remotely, Chrome returns ws://localhost:... which won't work.
-    # Rewrite the WebSocket URL to match the actual CDP endpoint.
+        version_info = json.loads(resp.read())
+    ws_url = version_info['webSocketDebuggerUrl']
+    browser_str = version_info.get('Browser', 'unknown')
+
+    # Log which Chrome we connected to
     if is_remote:
         from urllib.parse import urlparse
         parsed_base = urlparse(base_url)
+        # Prominent note for remote Chrome — impossible to miss
+        print(f'[passe] remote Chrome: {parsed_base.hostname}:{parsed_base.port} ({browser_str})',
+              file=sys.stderr)
+        # Rewrite WS URL — Chrome returns ws://localhost:... which won't work remotely
         parsed_ws = urlparse(ws_url)
         ws_url = f'ws://{parsed_base.netloc}{parsed_ws.path}'
+    else:
+        print(f'[passe] Chrome: {browser_str}', file=sys.stderr)
+
     ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
     client = CDPClient(ws)
     await client.start()
-    return ws, client
+    conn_info = {'cdp': base_url, 'browser': browser_str, 'remote': is_remote}
+    return ws, client, conn_info
 
 
 # ── Actions ───────────────────────────────────────────────
@@ -776,13 +806,15 @@ async def do_screenshot(client: CDPClient, path: str = None,
         params['optimizeForSpeed'] = True
 
     t0 = time.monotonic()
+    dpr = 1  # default; overwritten below
     if full_page:
-        # Get full page dimensions
+        # Get full page dimensions + DPR in one round-trip
         metrics = await client.send('Runtime.evaluate', {
-            'expression': 'JSON.stringify({w: document.documentElement.scrollWidth, h: Math.min(document.documentElement.scrollHeight, 16384)})',
+            'expression': 'JSON.stringify({w: document.documentElement.scrollWidth, h: Math.min(document.documentElement.scrollHeight, 16384), dpr: window.devicePixelRatio})',
             'awaitPromise': False
         })
         dims = json.loads(metrics['result']['result']['value'])
+        dpr = dims.get('dpr', 1)
         params['clip'] = {
             'x': 0, 'y': 0,
             'width': dims['w'], 'height': dims['h'],
@@ -801,6 +833,14 @@ async def do_screenshot(client: CDPClient, path: str = None,
     data = base64.b64decode(result['result']['data'])
     decode_ms = round((time.monotonic() - t1) * 1000, 1)
 
+    # For viewport-only screenshots, fetch DPR after capture (off critical path)
+    if not full_page:
+        dpr_result = await client.send('Runtime.evaluate', {
+            'expression': 'window.devicePixelRatio',
+            'awaitPromise': False,
+        })
+        dpr = dpr_result.get('result', {}).get('result', {}).get('value', 1)
+
     ext = fmt if fmt not in ('jpeg',) else 'jpg'
     if path is None:
         path = f'/tmp/passe-{int(time.time())}.{ext}'
@@ -814,7 +854,7 @@ async def do_screenshot(client: CDPClient, path: str = None,
         'format': params['format'],
         'breakdown': {
             'capture_ms': capture_ms, 'decode_ms': decode_ms,
-            'write_ms': write_ms, 'bytes': len(data),
+            'write_ms': write_ms, 'bytes': len(data), 'dpr': dpr,
         },
     }
 
@@ -1984,7 +2024,7 @@ async def cmd_run(source: str, inline: str = None,
         print(json.dumps({'ok': True, 'steps': 0, 'total_ms': 0}))
         return
 
-    ws, client = await connect()
+    ws, client, conn_info = await connect()
     try:
         if reuse_tab:
             await client.attach_to_visible_page()
@@ -1995,6 +2035,8 @@ async def cmd_run(source: str, inline: str = None,
         if device:
             await do_device(client, device, dpr_override=dpr)
         summary = await run_script(client, steps)
+        summary['cdp'] = conn_info['cdp']
+        summary['browser'] = conn_info['browser']
         print(json.dumps(summary))
         sys.exit(0 if summary['ok'] else 1)
     finally:
@@ -2028,7 +2070,7 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
         optimize = True
         viewport_only = True
     output = args[0] if args else None
-    ws, client = await connect()
+    ws, client, _conn_info = await connect()
     try:
         await client.attach_to_first_page()
         if device:
@@ -2046,7 +2088,7 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
 
 async def cmd_eval(expression: str):
     """Atomic JS eval on current page."""
-    ws, client = await connect()
+    ws, client, _conn_info = await connect()
     try:
         await client.attach_to_first_page()
         result = await do_eval(client, expression)

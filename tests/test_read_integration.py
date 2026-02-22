@@ -106,7 +106,7 @@ def spa_server():
 @pytest.mark.asyncio
 async def test_spa_extraction_succeeds(spa_server):
     """Read a client-rendered SPA — trafilatura should extract the article content."""
-    ws, client = await connect()
+    ws, client, _info = await connect()
     try:
         await client.create_tab()
         await client.send('Page.enable')
@@ -132,7 +132,7 @@ async def test_eval_file_reads_and_executes(spa_server, tmp_path):
     js_file = tmp_path / 'test.js'
     js_file.write_text('(() => {\n  const x = 40;\n  const y = 2;\n  return x + y;\n})()')
 
-    ws, client = await connect()
+    ws, client, _info = await connect()
     try:
         await client.create_tab()
         await client.send('Page.enable')
@@ -152,7 +152,7 @@ async def test_eval_file_to_writes_result(spa_server, tmp_path):
     js_file.write_text('document.title')
     out_file = tmp_path / 'title.txt'
 
-    ws, client = await connect()
+    ws, client, _info = await connect()
     try:
         await client.create_tab()
         await client.send('Page.enable')
