@@ -29,11 +29,29 @@ Chrome Debug solves this by being a completely separate Chrome instance:
 
 ```bash
 #!/bin/bash
-exec "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+PROFILE="$HOME/.chrome-debug"
+
+# Re-entry guard: if Chrome Debug is already running, hand off the URL
+# via Chrome's singleton mechanism instead of spawning a second process.
+if [ -L "$PROFILE/SingletonLock" ]; then
+    lock_target=$(readlink "$PROFILE/SingletonLock" 2>/dev/null)
+    pid="${lock_target##*-}"
+    if kill -0 "$pid" 2>/dev/null; then
+        [ $# -gt 0 ] && "$CHROME" --user-data-dir="$PROFILE" "$@"
+        exit 0
+    fi
+fi
+
+# First launch — start with full debugging flags.
+"$CHROME" \
     --remote-debugging-port=9222 \
-    --user-data-dir="$HOME/.chrome-debug" \
+    --remote-debugging-address=0.0.0.0 \
+    --remote-allow-origins=* \
+    --user-data-dir="$PROFILE" \
     --no-default-browser-check \
-    "$@"
+    "$@" &
+wait
 ```
 
 Key flags:
@@ -41,9 +59,15 @@ Key flags:
 | Flag | Purpose |
 |------|---------|
 | `--remote-debugging-port=9222` | Exposes CDP on localhost:9222 for automation tools |
+| `--remote-debugging-address=0.0.0.0` | Binds to all interfaces (for Tailscale access from kube) |
+| `--remote-allow-origins=*` | Allows CDP connections from any origin |
 | `--user-data-dir=~/.chrome-debug` | Completely separate profile, cookies, extensions, history |
 | `--no-default-browser-check` | Suppresses the "set as default?" nag on launch |
 | `"$@"` | Passes through URL arguments so macOS can open links in it |
+
+The re-entry guard checks Chrome's `SingletonLock` (a symlink encoding the PID of the running Chrome process). When Chrome is alive, we hand off the URL with just `--user-data-dir` — Chrome's singleton IPC delivers it to the existing instance and exits. No debug port flag on re-entry (it's already bound on the running instance).
+
+Without this guard, macOS re-launching Chrome Debug.app to open a URL would spawn a second Chrome process fighting over port 9222.
 
 ### Info.plist
 
@@ -175,4 +199,4 @@ xattr -d com.apple.LaunchServices ~/Applications/Chrome\ Debug.app 2>/dev/null
 Re-run `lsregister -f` afterwards to ensure the registration is clean.
 
 **"Chrome is already running" conflicts**
-macOS can run multiple Chrome instances with different `--user-data-dir` values simultaneously. Chrome Debug and regular Chrome coexist without issues.
+macOS can run multiple Chrome instances with different `--user-data-dir` values simultaneously. Chrome Debug and regular Chrome coexist without issues. Opening a URL/file while Chrome Debug is already running is handled by the re-entry guard in `launch.sh` — it detects the running instance and hands off via Chrome's singleton IPC instead of spawning a conflicting second process.
