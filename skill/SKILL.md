@@ -78,7 +78,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 ## Verb reference
 
-**Navigation:** `goto <url>` (step NDJSON: `url`, `status_code`), `back`, `forward` (step NDJSON: `url`), `scroll <x> <y>`
+**Navigation:** `goto <url>` — raises on navigation failure (DNS, refused, chrome-error://). Step NDJSON: `url`, `status_code`. `back`, `forward` (step NDJSON: `url`). `scroll <x> <y>` (rarely needed — most verbs work regardless of scroll position)
 
 **Interaction:**
 - `click <selector>` — CSS selector
@@ -89,6 +89,8 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `select <selector> <value>` — dropdown
 - `press <key>` — Enter, Tab, Escape, etc.
 - `hover <selector>` — mouseover
+- `tap <selector>` — touch event (touchStart + touchEnd) for mobile UI
+- `swipe <selector> <direction> [distance]` — swipe gesture (left/right/up/down, default 200px)
 
 **Observation:**
 - `screenshot [--fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
@@ -109,7 +111,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 **Control:**
 - `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-idle [timeout_ms]` (network settles — replaces guessed waits), `wait-navigation`
-- `watch [--fast] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Debounces 100ms, screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
+- `watch [--fast] [--cooldown <ms>] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Cooldown 1000ms default (prevents screenshot storms). Screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
 - `assert <expression>` — fail script if falsy. Sub-millisecond.
 - `log <message>` — print to stderr
 
@@ -277,9 +279,19 @@ ID=$(curl -s $PASSE_CDP/json/list | python3 -c "import json,sys; [print(t['id'])
 curl -s "$PASSE_CDP/json/close/$ID"
 ````
 
-## User handoff (login required)
+## Tab modes
 
-Passe creates and closes its own tab — the user never sees it. When you need the user to interact (e.g., log in), use `--reuse-tab` and `--keep-tab`:
+Passe has three tab modes, controlled by run flags:
+
+| Mode | Flag | Tab lifecycle | Use for |
+|------|------|---------------|---------|
+| **Default** | (none) | Creates new tab → closes on exit | Automation, screenshots — invisible to user |
+| **Keep** | `--keep-tab` | Creates new tab → leaves open | Showing the user a result |
+| **Reuse** | `--reuse-tab` | Attaches to existing visible tab → leaves open | User handoff (login flows, OAuth) |
+
+`--reuse-tab` attaches to the first non-chrome:// tab and implies `--keep-tab`.
+
+**User handoff pattern** (login required):
 
 ```bash
 # Navigate the user's visible tab
@@ -289,14 +301,12 @@ passe run --reuse-tab -c 'goto https://accounts.google.com/oauth/...'
 passe run --reuse-tab -c 'eval document.body.innerText'
 ```
 
-`--reuse-tab` attaches to the first non-chrome:// tab. `--keep-tab` prevents passe from closing the tab on exit. `--reuse-tab` implies `--keep-tab`.
-
 ## Anti-patterns
 
 - **`fill` vs `type`**: Default to `type` for SPAs. `fill` is for plain HTML forms only.
 - **Guessing cookie button text**: `click-text "Reject"` fails more often than it works. Scout first.
 - **`click-text` with multiple matches**: Clicks first visible match. Be specific.
-- **Tab handling**: Passe attaches to the first tab. No tab switching.
+- **Tab handling**: Default mode creates and closes its own tab. Use `--reuse-tab` to attach to the user's visible tab (see Tab modes).
 - **Script errors are fatal**: No mid-script recovery. Partial timing still emitted to stderr.
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
