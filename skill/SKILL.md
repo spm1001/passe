@@ -289,7 +289,7 @@ Passe has three tab modes, controlled by run flags:
 | **Keep** | `--keep-tab` | Creates new tab → leaves open | Showing the user a result |
 | **Reuse** | `--reuse-tab` | Attaches to existing visible tab → leaves open | User handoff (login flows, OAuth) |
 
-`--reuse-tab` attaches to the first non-chrome:// tab and implies `--keep-tab`.
+`--reuse-tab` attaches to the first non-chrome:// tab and implies `--keep-tab`. **Warning:** `--reuse-tab` navigates away from whatever the user is looking at — only use when explicitly co-viewing or when you've told the user what's about to happen.
 
 **User handoff pattern** (login required):
 
