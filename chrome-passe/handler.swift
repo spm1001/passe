@@ -1,19 +1,19 @@
 import Cocoa
 
 // ---------------------------------------------------------------------------
-// Chrome Debug — native macOS launcher
+// Chrome Passe — native macOS launcher
 //
-// Replaces launch.sh as CFBundleExecutable. Handles Apple Events that bash
-// can't receive: openFiles (Finder double-click) and kAEGetURL (link clicks
-// from other apps). Launches Chrome with debug flags on first run, hands off
-// URLs via Chrome's singleton mechanism on re-entry, quits when Chrome exits.
+// Replaces the bash wrapper as CFBundleExecutable. Handles Apple Events that
+// bash can't receive: openFiles (Finder double-click) and kAEGetURL (link
+// clicks from other apps). Launches Chrome via NSWorkspace so it gets its own
+// TCC coalition (microphone, camera, etc. all work). Quits when Chrome exits.
 // ---------------------------------------------------------------------------
 
-class ChromeDebugDelegate: NSObject, NSApplicationDelegate {
+class ChromePasseDelegate: NSObject, NSApplicationDelegate {
 
-    static let chrome  = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-    static let profile = NSHomeDirectory() + "/.chrome-debug"
-    static let lock    = profile + "/SingletonLock"
+    static let chromeApp = URL(fileURLWithPath: "/Applications/Google Chrome.app")
+    static let profile   = NSHomeDirectory() + "/.chrome-passe"
+    static let lock      = profile + "/SingletonLock"
 
     /// True once we've launched Chrome ourselves (distinguishes "Chrome was
     /// already running when we started" from "we started Chrome").
@@ -34,7 +34,7 @@ class ChromeDebugDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if !chromeIsRunning() {
-            launchChrome(extraArgs: [])
+            launchChrome(urls: [])
         }
 
         // Poll: quit when Chrome exits so the dock icon disappears.
@@ -57,7 +57,7 @@ class ChromeDebugDelegate: NSObject, NSApplicationDelegate {
 
     /// Finder double-click / "Open With" — may receive multiple files at once.
     func application(_ sender: NSApplication, openFiles filenames: [String]) {
-        let urls = filenames.map { "file://\($0)" }
+        let urls = filenames.compactMap { URL(string: "file://\($0)") }
         openURLs(urls)
         sender.reply(toOpenOrPrint: .success)
     }
@@ -65,54 +65,57 @@ class ChromeDebugDelegate: NSObject, NSApplicationDelegate {
     /// URL scheme dispatch (http/https clicked in another app).
     @objc func handleGetURL(_ event: NSAppleEventDescriptor,
                             withReply reply: NSAppleEventDescriptor) {
-        guard let url = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue
+        guard let urlString = event.paramDescriptor(forKeyword: keyDirectObject)?.stringValue,
+              let url = URL(string: urlString)
         else { return }
         openURLs([url])
     }
 
     // MARK: - Chrome management
 
-    private func openURLs(_ urls: [String]) {
+    private func openURLs(_ urls: [URL]) {
         if chromeIsRunning() || launchedByUs {
             // Chrome is alive (or we just launched it and the lock isn't
-            // established yet). Hand off via singleton — Chrome's own IPC
-            // delivers the URLs to the running instance.
-            for url in urls {
-                runChrome(args: ["--user-data-dir=\(Self.profile)", url])
-            }
+            // established yet). Open URLs in the running Chrome instance.
+            if urls.isEmpty { return }
+            let config = NSWorkspace.OpenConfiguration()
+            config.arguments = ["--user-data-dir=\(Self.profile)"]
+            NSWorkspace.shared.open(
+                urls,
+                withApplicationAt: Self.chromeApp,
+                configuration: config
+            )
         } else {
             // Nobody started Chrome yet — do a full launch with the URLs.
-            launchChrome(extraArgs: urls)
+            launchChrome(urls: urls)
         }
     }
 
-    private func launchChrome(extraArgs: [String]) {
-        var args = [
+    private func launchChrome(urls: [URL]) {
+        // Launch Chrome via NSWorkspace — Chrome gets its own TCC coalition
+        // so microphone, camera, screen recording, etc. all work without
+        // needing usage descriptions in Chrome Passe's Info.plist.
+        let config = NSWorkspace.OpenConfiguration()
+        config.arguments = [
             "--remote-debugging-port=9222",
-            "--remote-debugging-address=0.0.0.0",
             "--remote-allow-origins=*",
             "--user-data-dir=\(Self.profile)",
             "--no-default-browser-check",
         ]
-        args += extraArgs
-        runChrome(args: args)
-        launchedByUs = true
-    }
 
-    private func runChrome(args: [String]) {
-        // Launch Chrome via bash, not Process() directly. When Process()
-        // spawns Chrome from an NSApplication, macOS gives Chrome its own
-        // dock icon ("Google Chrome") alongside ours. Bash's fork/exec
-        // keeps Chrome grouped under Chrome Debug.app's process identity —
-        // one dock icon, correct name.
-        let quoted = args.map { "'\($0)'" }.joined(separator: " ")
-        let cmd = "'\(Self.chrome)' \(quoted) &"
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/bash")
-        task.arguments = ["-c", cmd]
-        task.standardOutput = FileHandle.nullDevice
-        task.standardError = FileHandle.nullDevice
-        try? task.run()
+        if urls.isEmpty {
+            NSWorkspace.shared.openApplication(
+                at: Self.chromeApp,
+                configuration: config
+            )
+        } else {
+            NSWorkspace.shared.open(
+                urls,
+                withApplicationAt: Self.chromeApp,
+                configuration: config
+            )
+        }
+        launchedByUs = true
     }
 
     /// Bring Chrome's window to front by PID from SingletonLock.
@@ -144,6 +147,6 @@ class ChromeDebugDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Entry point
 
 let app = NSApplication.shared
-let delegate = ChromeDebugDelegate()
+let delegate = ChromePasseDelegate()
 app.delegate = delegate
 app.run()
