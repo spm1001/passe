@@ -163,7 +163,7 @@ This is the same insight that made tools like Claude in Chrome and BrowserMCP va
 
 **The security model**: the debug port binds to localhost only. Since Chrome 136 (March 2025), `--remote-debugging-port` requires a separate `--user-data-dir` — Chrome won't expose your main profile's data directory over the debug protocol. This was a response to malware campaigns that relaunched Chrome with debug flags to dump cookies. The separate data directory gets its own encryption key, protecting main profile credentials.
 
-If Chrome isn't running when you invoke passe, it auto-starts one with `--user-data-dir=~/.chrome-debug` — a bare profile with no logins. Fine for public pages, but it won't have your sessions.
+If Chrome isn't running when you invoke passe, it auto-starts one with `--user-data-dir=~/.chrome-passe` — a bare profile with no logins. Fine for public pages, but it won't have your sessions.
 
 ## When to use passe (and when not to)
 

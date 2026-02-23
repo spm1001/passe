@@ -325,12 +325,12 @@ def _start_chrome(port=9222, headless=False):
     cmd = [
         chrome_path,
         f'--remote-debugging-port={port}',
-        '--user-data-dir=' + str(Path.home() / '.chrome-debug'),
+        '--user-data-dir=' + str(Path.home() / '.chrome-passe'),
         '--no-default-browser-check',
     ]
     if headless:
         cmd.append('--headless=new')
-    label = 'headless Chrome' if headless else 'Chrome Debug'
+    label = 'headless Chrome' if headless else 'Chrome Passe'
     print(f"[passe] starting {label} ({os.path.basename(chrome_path)})...", file=sys.stderr)
     try:
         proc = subprocess.Popen(
@@ -390,7 +390,7 @@ async def connect(port=9222):
             )
             sys.exit(1)
         # Auto-launch: headless when no explicit CDP target (passe owns it),
-        # GUI when user explicitly pointed at localhost (they want Chrome Debug)
+        # GUI when user explicitly pointed at localhost (they want Chrome Passe)
         headless = not cdp_explicit
         chrome_proc = _start_chrome(port, headless=headless)
     with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:

@@ -41,12 +41,12 @@ Passe connects to Chrome on port 9222. Two modes:
 
 | Machine | Chrome | Auth state | Use for |
 |---------|--------|-----------|---------|
-| **Mac** (daily driver) | Chrome Debug with `--remote-debugging-port=9222` | Full cookies, SSO | Authenticated browsing, OAuth flows |
+| **Mac** (daily driver) | Chrome Passe with `--remote-debugging-port=9222` | Full cookies, SSO | Authenticated browsing, OAuth flows |
 | **Kube/remote** | Headless Chromium (systemd) on `localhost:9222` | Bare profile | Dev testing, screenshots, device emulation |
 
 Use `--cdp http://host:9222` to target a specific Chrome instance per-invocation (overrides `PASSE_CDP` env var). Default: localhost:9222.
 
-**Kube → Mac connection:** Mac exposes Chrome Debug via `tailscale serve --bg --tcp 9222 tcp://localhost:9222`. Kube has `PASSE_CDP=http://<mac-tailscale-ip>:9222` in `.bashrc`. Passe auto-rewrites WebSocket URLs. **If it fails:** check for stale Chrome processes on Mac (`lsof -i :9222`) — old PIDs hogging port 9222 is the most common cause.
+**Kube → Mac connection:** Mac exposes Chrome Passe via `tailscale serve --bg --tcp 9222 tcp://localhost:9222`. Kube has `PASSE_CDP=http://<mac-tailscale-ip>:9222` in `.bashrc`. Passe auto-rewrites WebSocket URLs. **If it fails:** check for stale Chrome processes on Mac (`lsof -i :9222`) — old PIDs hogging port 9222 is the most common cause.
 
 ## Invocation
 
@@ -263,7 +263,7 @@ This replaces the painful minify → bash variable → unquoted heredoc dance.
 
 ## Remote Chrome (cross-machine)
 
-When Chrome Debug runs on a different machine (e.g., Mac) and you're on Kube/remote:
+When Chrome Passe runs on a different machine (e.g., Mac) and you're on Kube/remote:
 
 1. Set `PASSE_CDP=http://<host>:9222` — find the host via `tailscale status | grep macOS`
 2. Verify: `curl -s $PASSE_CDP/json/list` should show open tabs

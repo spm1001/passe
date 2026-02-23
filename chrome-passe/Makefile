@@ -1,12 +1,12 @@
-# Chrome Debug — native macOS launcher
+# Chrome Passe — native macOS launcher
 #
 # Build:   make
 # Install: make install
 # Clean:   make clean
 
-BINARY   = chrome-debug
+BINARY   = chrome-passe
 SOURCE   = handler.swift
-APP_DIR  = $(HOME)/Applications/Chrome Debug.app
+APP_DIR  = $(HOME)/Applications/Chrome Passe.app
 
 SWIFTC     = swiftc
 FRAMEWORKS = -framework Cocoa

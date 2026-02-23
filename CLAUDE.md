@@ -33,7 +33,7 @@ Passe is for **fast, scriptable, single-connection browser automation from the C
 
 Passe connects to Chrome on port 9222. Sameer's daily driver Chrome runs with `--remote-debugging-port=9222` — so passe gets his full auth state, cookies, SSO sessions.
 
-If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-debug`. That's a **bare profile** — no auth, no cookies, no extensions. This is fine for testing public pages but won't have any login sessions.
+If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-passe`. That's a **bare profile** — no auth, no cookies, no extensions. This is fine for testing public pages but won't have any login sessions.
 
 **Never assume you have auth unless you've confirmed Chrome is Sameer's daily driver instance.**
 
@@ -52,7 +52,7 @@ ExecStart=/usr/bin/chromium --headless=new --remote-debugging-port=9222 --no-san
 
 ### Remote Chrome from kube (Mac via tailscale)
 
-Chrome Debug on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--remote-debugging-address=0.0.0.0`). Kube reaches it via `tailscale serve`:
+Chrome Passe on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--remote-debugging-address=0.0.0.0`). Kube reaches it via `tailscale serve`:
 
 | Where | What |
 |-------|------|
@@ -62,7 +62,7 @@ Chrome Debug on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--re
 
 **Verify:** `curl -s $PASSE_CDP/json/version` should return Chrome's version JSON.
 
-**If connection fails but Chrome is running:** Check for stale Chrome processes hogging port 9222. `lsof -i :9222` on the Mac — if old PIDs hold the port, kill them and restart Chrome Debug. This is the most common failure mode.
+**If connection fails but Chrome is running:** Check for stale Chrome processes hogging port 9222. `lsof -i :9222` on the Mac — if old PIDs hold the port, kill them and restart Chrome Passe. This is the most common failure mode.
 
 ### Tab isolation
 
