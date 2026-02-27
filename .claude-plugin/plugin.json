@@ -1,0 +1,9 @@
+{
+  "name": "passe",
+  "version": "0.1.0",
+  "description": "Fast browser automation via Chrome DevTools Protocol. Requires: passe CLI (uv tool install passe), Chrome with CDP",
+  "author": { "name": "Sameer Modha", "url": "https://github.com/spm1001" },
+  "repository": "https://github.com/spm1001/passe",
+  "license": "MIT",
+  "keywords": ["browser", "automation", "cdp", "chrome", "testing"]
+}
