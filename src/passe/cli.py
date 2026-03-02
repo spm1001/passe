@@ -13,6 +13,7 @@ Commands:
 
 import asyncio
 import base64
+import contextlib
 import json
 import os
 import shlex
@@ -213,8 +214,13 @@ class CDPClient:
         self._owns_tab = False
         return self.session_id
 
-    async def attach_to_visible_page(self) -> str:
-        """Attach to the first non-chrome:// page tab. For --reuse-tab."""
+    async def attach_to_visible_page(self, origin: str = None) -> str:
+        """Attach to a non-chrome:// page tab. For --reuse-tab.
+
+        If origin is given (e.g. 'http://localhost:3333'), prefer a tab
+        already on that origin. Falls back to the first non-chrome:// tab.
+        Always logs the attached tab's URL to stderr.
+        """
         result = await self.send('Target.getTargets')
         pages = [t for t in result['result']['targetInfos']
                  if t['type'] == 'page' and not t.get('url', '').startswith('chrome://')]
@@ -223,8 +229,17 @@ class CDPClient:
             pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
         if not pages:
             raise RuntimeError('No browser tab to reuse — open a tab first')
+        # Prefer origin match when caller knows the target
+        target = pages[0]
+        if origin:
+            for p in pages:
+                if p.get('url', '').startswith(origin):
+                    target = p
+                    break
+        tab_url = target.get('url', 'unknown')
+        print(f'[passe] reuse-tab: {tab_url}', file=sys.stderr)
         result = await self.send('Target.attachToTarget', {
-            'targetId': pages[0]['targetId'],
+            'targetId': target['targetId'],
             'flatten': True
         })
         self.session_id = result['result']['sessionId']
@@ -246,12 +261,24 @@ class CDPClient:
         return self.session_id
 
     async def close_tab(self):
-        """Close the tab if we created it. Safe to call during teardown."""
+        """Close the tab if we created it. Safe to call during teardown.
+
+        Navigates to about:blank first to drop SSE/WebSocket connections
+        that would otherwise block Target.closeTarget indefinitely.
+        """
         self._network_enabled = False
         if self._owns_tab and self._target_id:
             try:
-                await self.send('Target.closeTarget', {'targetId': self._target_id})
-            except (websockets.ConnectionClosed, asyncio.CancelledError):
+                # Drop SSE/WS connections — about:blank tears down page resources
+                await self.send('Page.navigate', {'url': 'about:blank'}, timeout=5.0)
+            except (websockets.ConnectionClosed, asyncio.CancelledError,
+                    asyncio.TimeoutError):
+                pass
+            try:
+                await self.send('Target.closeTarget',
+                                {'targetId': self._target_id}, timeout=5.0)
+            except (websockets.ConnectionClosed, asyncio.CancelledError,
+                    asyncio.TimeoutError):
                 pass
             self._owns_tab = False
 
@@ -370,8 +397,9 @@ def _is_loopback(url: str) -> bool:
         return False
 
 
+@contextlib.asynccontextmanager
 async def connect(port=9222):
-    """Connect to Chrome, starting it if needed. Return (websocket, CDPClient, info).
+    """Connect to Chrome, yield (CDPClient, info), clean up on exit.
 
     info dict contains: cdp (base URL), browser (version string), remote (bool),
     and optionally _process (Popen) if we auto-launched headless Chrome.
@@ -418,7 +446,12 @@ async def connect(port=9222):
         'cdp': base_url, 'browser': browser_str, 'remote': is_remote,
         '_process': chrome_proc,
     }
-    return ws, client, conn_info
+    try:
+        yield client, conn_info
+    finally:
+        await client.stop()
+        await ws.close()
+        _teardown_chrome(conn_info)
 
 
 def _teardown_chrome(conn_info: dict):
@@ -2056,27 +2089,32 @@ async def cmd_run(source: str, inline: str = None,
         print(json.dumps({'ok': True, 'steps': 0, 'total_ms': 0}))
         return
 
-    ws, client, conn_info = await connect()
-    try:
+    async with connect() as (client, conn_info):
         if reuse_tab:
-            await client.attach_to_visible_page()
+            # Extract origin from first goto to prefer the right tab
+            reuse_origin = None
+            for verb, args in steps:
+                if verb == 'goto' and args:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(args[0])
+                    reuse_origin = f'{parsed.scheme}://{parsed.netloc}'
+                    break
+            await client.attach_to_visible_page(origin=reuse_origin)
         else:
             await client.create_tab()
         await client.send('Page.enable')
         # Apply device preset before script if --device flag used
         if device:
             await do_device(client, device, dpr_override=dpr)
-        summary = await run_script(client, steps)
-        summary['cdp'] = conn_info['cdp']
-        summary['browser'] = conn_info['browser']
-        print(json.dumps(summary))
-        sys.exit(0 if summary['ok'] else 1)
-    finally:
-        if not keep_tab:
-            await client.close_tab()
-        await client.stop()
-        await ws.close()
-        _teardown_chrome(conn_info)
+        try:
+            summary = await run_script(client, steps)
+            summary['cdp'] = conn_info['cdp']
+            summary['browser'] = conn_info['browser']
+            print(json.dumps(summary))
+            sys.exit(0 if summary['ok'] else 1)
+        finally:
+            if not keep_tab:
+                await client.close_tab()
 
 
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
@@ -2103,8 +2141,7 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
         optimize = True
         viewport_only = True
     output = args[0] if args else None
-    ws, client, conn_info = await connect()
-    try:
+    async with connect() as (client, conn_info):
         await client.attach_to_first_page()
         if device:
             await do_device(client, device, dpr_override=dpr)
@@ -2114,23 +2151,14 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
             'ok': True, 'file': info['file'], 'kb': info['kb'],
             'format': info['format'],
         }))
-    finally:
-        await client.stop()
-        await ws.close()
-        _teardown_chrome(conn_info)
 
 
 async def cmd_eval(expression: str):
     """Atomic JS eval on current page."""
-    ws, client, conn_info = await connect()
-    try:
+    async with connect() as (client, conn_info):
         await client.attach_to_first_page()
         result = await do_eval(client, expression)
         print(result)
-    finally:
-        await client.stop()
-        await ws.close()
-        _teardown_chrome(conn_info)
 
 
 def cmd_devices():

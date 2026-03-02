@@ -110,24 +110,22 @@ def spa_server(monkeypatch):
 @pytest.mark.asyncio
 async def test_spa_extraction_succeeds(spa_server):
     """Read a client-rendered SPA — trafilatura should extract the article content."""
-    ws, client, _info = await connect()
-    try:
+    async with connect() as (client, _info):
         await client.create_tab()
-        await client.send('Page.enable')
-        await do_navigate(client, f'http://127.0.0.1:{spa_server}')
-        result = await do_read(client)
+        try:
+            await client.send('Page.enable')
+            await do_navigate(client, f'http://127.0.0.1:{spa_server}')
+            result = await do_read(client)
 
-        # Trafilatura handles this SPA well — extracts article content
-        assert result['source'] in ('trafilatura', 'readability'), (
-            f'Expected trafilatura or readability, got {result["source"]}'
-        )
-        assert len(result['markdown']) > 200, (
-            f'Expected substantial content, got {len(result["markdown"])} chars'
-        )
-    finally:
-        await client.close_tab()
-        await client.stop()
-        await ws.close()
+            # Trafilatura handles this SPA well — extracts article content
+            assert result['source'] in ('trafilatura', 'readability'), (
+                f'Expected trafilatura or readability, got {result["source"]}'
+            )
+            assert len(result['markdown']) > 200, (
+                f'Expected substantial content, got {len(result["markdown"])} chars'
+            )
+        finally:
+            await client.close_tab()
 
 
 @pytest.mark.asyncio
@@ -136,17 +134,15 @@ async def test_eval_file_reads_and_executes(spa_server, tmp_path):
     js_file = tmp_path / 'test.js'
     js_file.write_text('(() => {\n  const x = 40;\n  const y = 2;\n  return x + y;\n})()')
 
-    ws, client, _info = await connect()
-    try:
+    async with connect() as (client, _info):
         await client.create_tab()
-        await client.send('Page.enable')
-        await do_navigate(client, f'http://127.0.0.1:{spa_server}')
-        result = await do_eval_file(client, str(js_file))
-        assert result == '42'
-    finally:
-        await client.close_tab()
-        await client.stop()
-        await ws.close()
+        try:
+            await client.send('Page.enable')
+            await do_navigate(client, f'http://127.0.0.1:{spa_server}')
+            result = await do_eval_file(client, str(js_file))
+            assert result == '42'
+        finally:
+            await client.close_tab()
 
 
 @pytest.mark.asyncio
@@ -156,16 +152,14 @@ async def test_eval_file_to_writes_result(spa_server, tmp_path):
     js_file.write_text('document.title')
     out_file = tmp_path / 'title.txt'
 
-    ws, client, _info = await connect()
-    try:
+    async with connect() as (client, _info):
         await client.create_tab()
-        await client.send('Page.enable')
-        await do_navigate(client, f'http://127.0.0.1:{spa_server}')
-        result = await do_eval_file_to(client, str(out_file), str(js_file))
-        # Title may be "Dashboard App" or the host depending on Chrome version/timing
-        assert len(result) > 0, 'eval-file-to returned empty string'
-        assert out_file.read_text() == result
-    finally:
-        await client.close_tab()
-        await client.stop()
-        await ws.close()
+        try:
+            await client.send('Page.enable')
+            await do_navigate(client, f'http://127.0.0.1:{spa_server}')
+            result = await do_eval_file_to(client, str(out_file), str(js_file))
+            # Title may be "Dashboard App" or the host depending on Chrome version/timing
+            assert len(result) > 0, 'eval-file-to returned empty string'
+            assert out_file.read_text() == result
+        finally:
+            await client.close_tab()
