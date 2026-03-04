@@ -58,7 +58,7 @@ async def test_leading_plus_trailing_on_burst(capsys):
         await asyncio.sleep(0.6)  # cooldown(200ms) + generous margin
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=200)
@@ -90,7 +90,7 @@ async def test_trailing_captures_final_state(capsys):
         await asyncio.sleep(0.5)
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=200)
@@ -122,7 +122,7 @@ async def test_no_trailing_when_no_suppression():
         await asyncio.sleep(0.35)  # well past cooldown
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=200)
@@ -152,7 +152,7 @@ async def test_cooldown_allows_spaced_captures():
         await asyncio.sleep(0.1)
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=100)
@@ -178,7 +178,7 @@ async def test_trailing_reports_suppressed_count(capsys):
         await asyncio.sleep(0.35)
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=200)
@@ -242,7 +242,7 @@ async def test_new_leading_cancels_pending_trailing():
         await asyncio.sleep(0.15)
         task.cancel()
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.verbs.do_screenshot', side_effect=mock_screenshot):
         task = asyncio.create_task(
             do_watch(client, '/tmp/test.jpg', fast=True,
                      debounce_ms=10, cooldown_ms=150)
