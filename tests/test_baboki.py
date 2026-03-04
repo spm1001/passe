@@ -228,8 +228,8 @@ async def test_scroll_before_screenshot_warns(capsys):
         ('screenshot', ['/tmp/test-warn.png']),
     ]
 
-    with patch('passe.cli.do_scroll', new_callable=AsyncMock):
-        with patch('passe.cli.do_screenshot', new_callable=AsyncMock,
+    with patch('passe.runner.do_scroll', new_callable=AsyncMock):
+        with patch('passe.runner.do_screenshot', new_callable=AsyncMock,
                    return_value={'file': '/tmp/test-warn.png', 'kb': 42,
                                  'format': 'png', 'breakdown': {}}):
             await run_script(client, steps)
@@ -248,8 +248,8 @@ async def test_scroll_before_viewport_screenshot_no_warning(capsys):
         ('screenshot', ['--viewport', '/tmp/test-nowarn.png']),
     ]
 
-    with patch('passe.cli.do_scroll', new_callable=AsyncMock):
-        with patch('passe.cli.do_screenshot', new_callable=AsyncMock,
+    with patch('passe.runner.do_scroll', new_callable=AsyncMock):
+        with patch('passe.runner.do_screenshot', new_callable=AsyncMock,
                    return_value={'file': '/tmp/test-nowarn.png', 'kb': 42,
                                  'format': 'png', 'breakdown': {}}):
             await run_script(client, steps)
@@ -267,7 +267,7 @@ async def test_no_warning_without_prior_scroll(capsys):
         ('screenshot', ['/tmp/test-noscroll.png']),
     ]
 
-    with patch('passe.cli.do_screenshot', new_callable=AsyncMock,
+    with patch('passe.runner.do_screenshot', new_callable=AsyncMock,
                return_value={'file': '/tmp/test-noscroll.png', 'kb': 42,
                              'format': 'png', 'breakdown': {}}):
         await run_script(client, steps)
@@ -295,7 +295,7 @@ async def test_screenshot_fast_flag():
     client = _mock_client()
     steps = [('screenshot', ['--fast', '/tmp/fast.jpg'])]
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.runner.do_screenshot', side_effect=mock_screenshot):
         await run_script(client, steps)
 
     assert len(calls) == 1
@@ -318,7 +318,7 @@ async def test_screenshot_format_quality_flags():
     client = _mock_client()
     steps = [('screenshot', ['--format', 'webp', '--quality', '50', '/tmp/out.webp'])]
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.runner.do_screenshot', side_effect=mock_screenshot):
         await run_script(client, steps)
 
     assert len(calls) == 1
@@ -339,7 +339,7 @@ async def test_screenshot_viewport_flag():
     client = _mock_client()
     steps = [('screenshot', ['--viewport', '/tmp/vp.png'])]
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.runner.do_screenshot', side_effect=mock_screenshot):
         await run_script(client, steps)
 
     assert len(calls) == 1
@@ -359,7 +359,7 @@ async def test_screenshot_fast_with_custom_quality():
     client = _mock_client()
     steps = [('screenshot', ['--fast', '--quality', '90', '/tmp/hq.jpg'])]
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.runner.do_screenshot', side_effect=mock_screenshot):
         await run_script(client, steps)
 
     assert len(calls) == 1
@@ -381,7 +381,7 @@ async def test_screenshot_no_flags_defaults():
     client = _mock_client()
     steps = [('screenshot', ['/tmp/default.png'])]
 
-    with patch('passe.cli.do_screenshot', side_effect=mock_screenshot):
+    with patch('passe.runner.do_screenshot', side_effect=mock_screenshot):
         await run_script(client, steps)
 
     assert len(calls) == 1

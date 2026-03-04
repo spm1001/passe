@@ -116,7 +116,7 @@ class TestFindChrome:
 
     def test_macos_finds_chrome_app(self):
         """On macOS, finds /Applications/Google Chrome.app."""
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('os.path.isfile', return_value=True):
             mock_sys.platform = 'darwin'
             result = _find_chrome()
@@ -124,7 +124,7 @@ class TestFindChrome:
 
     def test_macos_returns_none_when_missing(self):
         """On macOS with no Chrome installed, returns None."""
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('os.path.isfile', return_value=False):
             mock_sys.platform = 'darwin'
             result = _find_chrome()
@@ -135,7 +135,7 @@ class TestFindChrome:
         def fake_which(name):
             return '/usr/bin/chromium-browser' if name == 'chromium-browser' else None
 
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('shutil.which', side_effect=fake_which):
             mock_sys.platform = 'linux'
             result = _find_chrome()
@@ -146,7 +146,7 @@ class TestFindChrome:
         def fake_which(name):
             return '/usr/bin/google-chrome' if name == 'google-chrome' else None
 
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('shutil.which', side_effect=fake_which):
             mock_sys.platform = 'linux'
             result = _find_chrome()
@@ -154,7 +154,7 @@ class TestFindChrome:
 
     def test_linux_returns_none_when_no_chrome(self):
         """On Linux with nothing installed, returns None."""
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('shutil.which', return_value=None):
             mock_sys.platform = 'linux'
             result = _find_chrome()
@@ -167,7 +167,7 @@ class TestFindChrome:
                 return f'/usr/bin/{name}'
             return None
 
-        with patch('passe.cli.sys') as mock_sys, \
+        with patch('passe.connection.sys') as mock_sys, \
              patch('shutil.which', side_effect=fake_which):
             mock_sys.platform = 'linux'
             result = _find_chrome()
@@ -201,16 +201,17 @@ class TestMainFlagPassthrough:
     """Test that main() passes --device and --dpr to subcommands."""
 
     def test_cdp_sets_override(self):
-        """--cdp sets _cdp_override module global."""
+        """--cdp sets _cdp_override in connection module."""
         import passe.cli as cli
-        original = cli._cdp_override
+        import passe.connection as conn
+        original = conn._cdp_override
         try:
             with patch.object(sys, 'argv', ['passe', '--cdp', 'ws://remote:9222', '--help']):
                 with pytest.raises(SystemExit):
                     cli.main()
-            assert cli._cdp_override == 'ws://remote:9222'
+            assert conn._cdp_override == 'ws://remote:9222'
         finally:
-            cli._cdp_override = original
+            conn.set_cdp_override(original)
 
     def test_device_and_dpr_passed_to_cmd_run(self):
         """--device and --dpr reach cmd_run as kwargs."""
@@ -262,7 +263,8 @@ class TestMainFlagPassthrough:
     def test_flags_before_subcommand(self):
         """Global flags work regardless of position before the subcommand."""
         import passe.cli as cli
-        original = cli._cdp_override
+        import passe.connection as conn
+        original = conn._cdp_override
         try:
             mock_cmd = MagicMock(return_value='sentinel')
             with patch.object(sys, 'argv',
@@ -272,8 +274,8 @@ class TestMainFlagPassthrough:
                     with patch('passe.cli._run'):
                         cli.main()
 
-                assert cli._cdp_override == 'ws://x:9222'
+                assert conn._cdp_override == 'ws://x:9222'
                 _, kwargs = mock_cmd.call_args
                 assert kwargs['device'] == 'iPad Air'
         finally:
-            cli._cdp_override = original
+            conn.set_cdp_override(original)
