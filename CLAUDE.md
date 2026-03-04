@@ -236,7 +236,21 @@ uv tool install /Users/modha/Repos/passe --force --reinstall
 
 ## Architecture
 
-Single file: `src/passe/cli.py`. The `CDPClient` class handles WebSocket message routing with future-based responses. `do_*` functions are the action layer. `run_script()` is the execution engine that dispatches verbs to actions.
+Modular package under `src/passe/`:
+
+| Module | What |
+|--------|------|
+| `parser.py` | DSL parsing: `parse_script`, `split_inline`, verb sets (`KNOWN_VERBS`, `NAV_VERBS`) |
+| `client.py` | `CDPClient` — WebSocket message routing, tab lifecycle, network capture |
+| `connection.py` | `connect()` context manager, Chrome discovery/launch, `set_cdp_override()` |
+| `verbs.py` | All `do_*` action functions (~25 verbs) |
+| `runner.py` | `run_script()` dispatch loop, capture summary helpers |
+| `commands.py` | CLI subcommands: `cmd_run`, `cmd_screenshot`, `cmd_eval`, `cmd_devices` |
+| `cli.py` | Entry point: `main()`, help text, re-exports for backward compat |
+| `_libs.py` | JS constants (Readability.js, Turndown.js, shadow flattening, extraction) |
+| `_devices.py` | Device emulation presets |
+
+Dependency graph is a strict DAG: parser/client (foundation) → connection/verbs → runner → commands → cli. No circular imports. `cli.py` re-exports all public symbols so `from passe.cli import X` still works — but new code should import from the owning module. Tests that mock verbs must patch `passe.runner.do_X` (when mocking inside `run_script`) or `passe.verbs.do_X` (when mocking inside another verb like `do_watch`).
 
 ### Event buffering
 
@@ -250,4 +264,4 @@ When a `wait_for_event` waiter is active, events go directly to the waiter. When
 
 `CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. The collector doesn't consume events — they still flow to waiters and queues, allowing future features (wait-idle) to coexist on the same event stream.
 
-No external dependencies beyond `websockets`. Everything else runs in Chrome's V8.
+No external dependencies beyond `websockets` (and `trafilatura` for content extraction). Everything else runs in Chrome's V8.
