@@ -203,6 +203,18 @@ async def cmd_fetch(url: str, path: str = None,
             await client.close_tab()
 
 
+async def _warn_if_blank_page(client):
+    """Warn if attached to about:blank or chrome:// — likely stale tab after run."""
+    try:
+        url = await do_eval(client, 'window.location.href')
+        if url in ('about:blank', '') or url.startswith('chrome://'):
+            print(f'[passe] warning: attached to {url} — did a previous '
+                  f'passe run just close its tab? Use eval-to/screenshot '
+                  f'inside the run script instead.', file=sys.stderr)
+    except Exception:
+        pass
+
+
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
     """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
     fast = '--fast' in args
@@ -229,6 +241,7 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
     output = args[0] if args else None
     async with connect() as (client, conn_info):
         await client.attach_to_first_page()
+        await _warn_if_blank_page(client)
         if device:
             await do_device(client, device, dpr_override=dpr)
         info = await do_screenshot(client, output, viewport_only=viewport_only,
@@ -243,6 +256,7 @@ async def cmd_eval(expression: str):
     """Atomic JS eval on current page."""
     async with connect() as (client, conn_info):
         await client.attach_to_first_page()
+        await _warn_if_blank_page(client)
         result = await do_eval(client, expression)
         print(result)
 
