@@ -9,6 +9,56 @@ from passe.runner import run_script
 from passe.verbs import do_device, do_eval, do_screenshot
 
 
+def _emit_fetch_hint(steps):
+    """Emit stderr hint when goto+read (or goto+wait+read) detected.
+
+    Fires once per script — suggests the fetch compound verb.
+    """
+    hinted_fetch = False
+    hinted_wait = False
+    for i, (verb, args) in enumerate(steps):
+        if hinted_fetch and hinted_wait:
+            break
+        if verb != 'goto':
+            continue
+        # Look ahead: goto → [wait*] → read?
+        j = i + 1
+        saw_wait = False
+        while j < len(steps) and steps[j][0] == 'wait':
+            saw_wait = True
+            j += 1
+        if j < len(steps) and steps[j][0] == 'read':
+            if not hinted_fetch:
+                print('[passe] hint: fetch URL [path] combines '
+                      'goto+wait+read in one step', file=sys.stderr)
+                hinted_fetch = True
+            if saw_wait and not hinted_wait:
+                print('[passe] hint: read auto-waits after goto '
+                      '— explicit wait is unnecessary', file=sys.stderr)
+                hinted_wait = True
+
+
+def _emit_inline_hints(steps, inline_text):
+    """Emit stderr hints when -c input is overly complex.
+
+    Fires once per category: complex script (>4 verbs or >200 chars)
+    and long eval (eval/eval-to arg >120 chars).
+    """
+    # Hint 1: script complexity
+    if len(steps) > 4 or len(inline_text) > 200:
+        print('[passe] hint: use heredoc for complex scripts '
+              '(5+ verbs or long lines)', file=sys.stderr)
+
+    # Hint 2: long eval expressions
+    for verb, args in steps:
+        if verb in ('eval', 'eval-to', 'assert') and args:
+            expr = args[-1]  # expression is last arg (eval-to: path then expr)
+            if len(expr) > 120:
+                print('[passe] hint: use eval-file for complex JS '
+                      '— avoids minifying to one line', file=sys.stderr)
+                break
+
+
 async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
                   device: str = None, dpr: float = None):
@@ -28,6 +78,10 @@ async def cmd_run(source: str, inline: str = None,
             text = f.read()
 
     steps = parse_script(text)
+    if inline and steps:
+        _emit_inline_hints(steps, inline)
+    if steps:
+        _emit_fetch_hint(steps)
     if not steps:
         print(json.dumps({'ok': True, 'steps': 0, 'total_ms': 0}))
         return
