@@ -9,6 +9,46 @@ from passe.runner import run_script
 from passe.verbs import do_device, do_eval, do_screenshot
 
 
+def _emit_summary(summary):
+    """Emit a human-readable one-liner to stderr after script execution."""
+    steps_n = summary.get('steps', 0)
+    ms = summary.get('total_ms', 0)
+
+    if not summary.get('ok'):
+        verb = summary.get('verb', '?')
+        error = summary.get('error', 'unknown error')
+        at = summary.get('failed_at', '?')
+        print(f'[passe] failed at step {at} ({verb}): {error}',
+              file=sys.stderr)
+        return
+
+    parts = [f'{steps_n} steps', f'{ms:.0f}ms']
+
+    files = summary.get('files', [])
+    for f in files:
+        verb = f.get('verb', '')
+        path = f.get('path', '')
+        if verb == 'screenshot':
+            kb = f.get('kb', 0)
+            parts.append(f'{path} ({kb:.0f}KB)')
+        elif verb in ('read', 'fetch'):
+            wc = f.get('word_count', 0)
+            parts.append(f'{path} ({wc} words)')
+        elif verb == 'snapshot':
+            parts.append(path)
+        elif verb == 'capture':
+            n = f.get('requests', 0)
+            parts.append(f'{path} ({n} requests)')
+        else:
+            parts.append(path)
+
+    url = summary.get('final_url')
+    if url:
+        parts.append(url)
+
+    print(f'[passe] done: {", ".join(parts)}', file=sys.stderr)
+
+
 def _emit_fetch_hint(steps):
     """Emit stderr hint when goto+read (or goto+wait+read) detected.
 
@@ -107,6 +147,7 @@ async def cmd_run(source: str, inline: str = None,
             summary = await run_script(client, steps)
             summary['cdp'] = conn_info['cdp']
             summary['browser'] = conn_info['browser']
+            _emit_summary(summary)
             print(json.dumps(summary))
             sys.exit(0 if summary['ok'] else 1)
         finally:
