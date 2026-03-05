@@ -218,18 +218,28 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 12. **CLI stderr hints**: Passe emits helpful hints on stderr — inline script complexity warnings (>4 verbs, >200 chars), `goto`+`read` → `fetch` suggestions, "did you mean?" for wrong verb names, about:blank tab warnings, and bare Chrome profile warnings. These are informational. Read and act on them.
 13. **Human-readable summary line**: After every run, stderr shows a one-liner like `[passe] 3 steps, 342ms, /tmp/out.png (234KB)`. This is for quick sanity checks — the structured JSON in stdout is still the primary output.
 
-## Atomic commands
+## Subcommands (no DSL needed)
 
-For one-off operations without the script runner:
+Intent-level commands — each creates its own tab, runs, and cleans up:
 
 ```bash
-passe screenshot /tmp/current-page.png    # Screenshot whatever's loaded
-passe eval "document.title"                # Quick JS eval
-passe fetch https://example.com            # Fetch + extract content (creates own tab)
-passe fetch https://example.com /tmp/out.md  # Fetch to explicit path
+passe look https://example.com              # Goto + fast screenshot (always JPEG for Claude)
+passe look https://example.com /tmp/out.jpg # Explicit path
+
+passe check https://example.com --contains "Welcome"           # Assert text present (exit 0/1)
+passe check https://example.com --contains "OK" --screenshot /tmp/proof.jpg
+
+passe capture https://example.com /tmp/reqs.jsonl              # Goto + wait-idle + network JSONL
+passe capture --bodies https://example.com /tmp/reqs.jsonl     # Include response bodies
+
+passe fetch https://example.com              # Goto + auto-wait + read (short content inlined)
+passe fetch https://example.com /tmp/out.md  # Explicit path
+
+passe screenshot /tmp/current-page.png       # Screenshot current page (no navigation)
+passe eval "document.title"                  # Quick JS eval on current page
 ```
 
-`passe screenshot` and `passe eval` operate on the current page state — no navigation. `passe fetch` creates its own tab (like `passe run`), navigates, extracts, and closes it. Short content (<2000 words) is inlined in the stdout JSON — no file round-trip needed.
+`look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation.
 
 ### Environment variables
 

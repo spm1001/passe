@@ -279,6 +279,177 @@ async def cmd_fetch(url: str, path: str = None,
             await client.close_tab()
 
 
+async def cmd_look(url: str, path: str = None,
+                   device: str = None, dpr: float = None):
+    """Atomic look: create tab, goto + screenshot --fast, close tab."""
+    import tempfile
+    import time
+    from passe.verbs import do_navigate
+
+    async with connect() as (client, conn_info):
+        await client.create_tab()
+        await client.send('Page.enable')
+        if device:
+            await do_device(client, device, dpr_override=dpr)
+        try:
+            t0 = time.monotonic()
+            nav = await do_navigate(client, url)
+            output = path or os.path.join(tempfile.gettempdir(), 'passe-look.jpg')
+            info = await do_screenshot(client, output, viewport_only=True,
+                                       fmt='jpeg', quality=70,
+                                       optimize_speed=True)
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            summary = {
+                'ok': True, 'steps': 2, 'total_ms': ms,
+                'files': [{'path': info['file'], 'verb': 'screenshot',
+                           'format': 'jpeg', 'kb': info['kb']}],
+                'final_url': nav.get('url', url),
+                'status_code': nav.get('status_code'),
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+        except Exception as exc:
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            summary = {
+                'ok': False, 'steps': 2, 'total_ms': ms,
+                'verb': 'look', 'error': str(exc),
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+            sys.exit(1)
+        finally:
+            await client.close_tab()
+
+
+async def cmd_check(url: str, contains: str, screenshot_path: str = None,
+                    device: str = None, dpr: float = None):
+    """Atomic check: goto URL, assert text is present, optional screenshot."""
+    import time
+    from passe.verbs import do_navigate, do_assert
+
+    async with connect() as (client, conn_info):
+        await client.create_tab()
+        await client.send('Page.enable')
+        if device:
+            await do_device(client, device, dpr_override=dpr)
+        try:
+            t0 = time.monotonic()
+            nav = await do_navigate(client, url)
+            # Build JS assertion that checks for text in the page body
+            escaped = contains.replace('\\', '\\\\').replace("'", "\\'")
+            expr = f"document.body.innerText.includes('{escaped}')"
+            await do_assert(client, expr)
+
+            files = []
+            if screenshot_path:
+                info = await do_screenshot(client, screenshot_path,
+                                           viewport_only=True, fmt='jpeg',
+                                           quality=70, optimize_speed=True)
+                files.append({'path': info['file'], 'verb': 'screenshot',
+                              'format': 'jpeg', 'kb': info['kb']})
+
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            step_count = 2 + (1 if screenshot_path else 0)
+            summary = {
+                'ok': True, 'steps': step_count, 'total_ms': ms,
+                'final_url': nav.get('url', url),
+                'status_code': nav.get('status_code'),
+                'contains': contains,
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            if files:
+                summary['files'] = files
+            _emit_summary(summary)
+            print(json.dumps(summary))
+        except Exception as exc:
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            summary = {
+                'ok': False, 'steps': 2, 'total_ms': ms,
+                'verb': 'check', 'error': str(exc),
+                'contains': contains,
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+            sys.exit(1)
+        finally:
+            await client.close_tab()
+
+
+async def cmd_capture(url: str, path: str, bodies: bool = False,
+                      device: str = None, dpr: float = None):
+    """Atomic capture: create tab, enable network, goto + wait-idle, write JSONL."""
+    import time
+    from passe.runner import _build_capture_summary, _write_capture_jsonl
+    from passe.verbs import do_navigate, do_wait_idle
+
+    async with connect() as (client, conn_info):
+        await client.create_tab()
+        await client.send('Page.enable')
+        await client.enable_network()
+        if device:
+            await do_device(client, device, dpr_override=dpr)
+        try:
+            t0 = time.monotonic()
+            nav = await do_navigate(client, url)
+            await do_wait_idle(client, timeout_ms=30000)
+
+            requests = client.get_network_requests()
+            if bodies:
+                import base64 as b64
+                for r in requests:
+                    if not r.get('completed'):
+                        continue
+                    try:
+                        body_result = await client.send('Network.getResponseBody', {
+                            'requestId': r['requestId'],
+                        })
+                        body_data = body_result.get('result', {})
+                        body = body_data.get('body', '')
+                        is_base64 = body_data.get('base64Encoded', False)
+                        r['body'] = body
+                        r['body_base64'] = is_base64
+                        r['body_size'] = (len(b64.b64decode(body))
+                                          if is_base64 else len(body))
+                    except Exception:
+                        pass
+            _write_capture_jsonl(path, requests)
+            cap_summary = _build_capture_summary(requests)
+            ms = round((time.monotonic() - t0) * 1000, 1)
+
+            file_entry = {'path': path, 'verb': 'capture'}
+            file_entry.update(cap_summary)
+            summary = {
+                'ok': True, 'steps': 3, 'total_ms': ms,
+                'files': [file_entry],
+                'final_url': nav.get('url', url),
+                'status_code': nav.get('status_code'),
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+        except Exception as exc:
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            summary = {
+                'ok': False, 'steps': 3, 'total_ms': ms,
+                'verb': 'capture', 'error': str(exc),
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+            sys.exit(1)
+        finally:
+            await client.close_tab()
+
+
 async def _warn_if_blank_page(client):
     """Warn if attached to about:blank or chrome:// — likely stale tab after run."""
     try:

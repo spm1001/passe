@@ -16,7 +16,8 @@ import os
 import sys
 
 from passe.connection import set_cdp_override
-from passe.commands import cmd_run, cmd_fetch, cmd_screenshot, cmd_eval, cmd_devices
+from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
+                            cmd_screenshot, cmd_eval, cmd_devices)
 
 # ── Re-exports for backward compatibility ─────────────────
 # Tests and external code import these from passe.cli.
@@ -63,6 +64,9 @@ Commands:
   passe run -c 'verbs...'         Run inline script
   passe run script.passe          Run script file
   passe run - <<'EOF' ... EOF     Run from stdin
+  passe look <url> [path]          Goto + fast screenshot (see the page)
+  passe check <url> --contains T  Goto + assert text present (deploy verification)
+  passe capture <url> [flags] <path> Goto + wait + record network requests
   passe fetch <url> [flags] [path] Fetch and extract page content
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
@@ -233,6 +237,37 @@ def main():
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
+    elif cmd == 'look' and len(all_args) >= 2:
+        look_args = all_args[1:]
+        url = look_args[0]
+        path = look_args[1] if len(look_args) > 1 else None
+        _run(cmd_look(url, path=path, device=device_name, dpr=dpr_val))
+    elif cmd == 'check' and len(all_args) >= 2:
+        check_args = all_args[1:]
+        # Extract --contains TEXT
+        contains_val, check_args = _extract_flag(check_args, '--contains')
+        if not contains_val:
+            print('passe check requires --contains TEXT', file=sys.stderr)
+            sys.exit(1)
+        # Extract optional --screenshot path
+        shot_path, check_args = _extract_flag(check_args, '--screenshot')
+        url = check_args[0] if check_args else None
+        if not url:
+            print('passe check requires a URL', file=sys.stderr)
+            sys.exit(1)
+        _run(cmd_check(url, contains=contains_val, screenshot_path=shot_path,
+                        device=device_name, dpr=dpr_val))
+    elif cmd == 'capture' and len(all_args) >= 2:
+        cap_args = all_args[1:]
+        bodies = '--bodies' in cap_args
+        cap_args = [a for a in cap_args if a != '--bodies']
+        url = cap_args[0] if len(cap_args) >= 1 else None
+        path = cap_args[1] if len(cap_args) >= 2 else None
+        if not url or not path:
+            print('passe capture requires URL and output path', file=sys.stderr)
+            sys.exit(1)
+        _run(cmd_capture(url, path=path, bodies=bodies,
+                         device=device_name, dpr=dpr_val))
     elif cmd == 'fetch' and len(all_args) >= 2:
         fetch_args = all_args[1:]
         source_val, fetch_args = _extract_flag(fetch_args, '--source')
