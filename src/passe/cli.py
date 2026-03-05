@@ -76,6 +76,7 @@ Global flags:
 Run flags:
   --keep-tab        Keep tab open after script
   --reuse-tab       Attach to existing visible tab (implies --keep-tab)
+  --flash [secs]    Keep tab, auto-close after idle timeout (default 30s)
   --no-keep-on-fail Close tab even when script fails (default: keep on failure)
   --quiet           Suppress stderr hints (same as PASSE_HINTS=0)
 
@@ -199,6 +200,18 @@ def main():
         quiet = '--quiet' in run_args or '-q' in run_args
         if quiet:
             os.environ['PASSE_HINTS'] = '0'
+        # --flash [seconds]: keep tab then auto-close. Bare --flash = 30s.
+        flash_val = None
+        if '--flash' in run_args:
+            idx = run_args.index('--flash')
+            # Peek at next arg — if it's a number, consume it as timeout
+            if idx + 1 < len(run_args) and run_args[idx + 1].isdigit():
+                flash_val = int(run_args[idx + 1])
+                run_args = run_args[:idx] + run_args[idx + 2:]
+            else:
+                flash_val = 30
+                run_args = run_args[:idx] + run_args[idx + 1:]
+            keep_tab = True  # --flash implies --keep-tab
         run_args = [a for a in run_args
                     if a not in ('--keep-tab', '--reuse-tab',
                                  '--no-keep-on-fail', '--quiet', '-q')]
@@ -208,12 +221,14 @@ def main():
             _run(cmd_run(None, inline=' '.join(run_args[1:]),
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 keep_on_fail=not no_keep_on_fail,
+                                flash=flash_val,
                                 device=device_name, dpr=dpr_val))
         elif len(run_args) == 1:
             # passe run [-flags] script.passe  OR  passe run [-flags] -
             _run(cmd_run(run_args[0],
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 keep_on_fail=not no_keep_on_fail,
+                                flash=flash_val,
                                 device=device_name, dpr=dpr_val))
         else:
             print(USAGE, file=sys.stderr)

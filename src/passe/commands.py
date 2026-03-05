@@ -118,9 +118,21 @@ def _emit_inline_hints(steps, inline_text):
                 break
 
 
+_FLASH_JS = """(function() {
+  var t = setTimeout(function() { window.close(); }, %d);
+  ['click', 'keydown', 'scroll', 'mousemove'].forEach(function(e) {
+    document.addEventListener(e, function() {
+      clearTimeout(t);
+      try { document.title = document.title.replace(/ \\[flash \\d+s\\]$/, ''); } catch(e) {}
+    }, { once: true });
+  });
+  try { document.title += ' [flash %ds]'; } catch(e) {}
+})()"""
+
+
 async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
-                  keep_on_fail: bool = True,
+                  keep_on_fail: bool = True, flash: int = None,
                   device: str = None, dpr: float = None):
     """Run a passe script from file, stdin, or inline."""
     # --reuse-tab implies --keep-tab (don't close someone else's tab)
@@ -181,8 +193,21 @@ async def cmd_run(source: str, inline: str = None,
             script_ok = False
             raise
         finally:
-            should_close = keep_tab or (not script_ok and keep_on_fail)
-            if not should_close:
+            should_keep = keep_tab or (not script_ok and keep_on_fail)
+            if should_keep:
+                # Determine flash timeout: explicit --flash, or default 30s
+                # for keep-on-fail tabs (not for explicit --keep-tab)
+                flash_s = flash
+                if flash_s is None and not script_ok and keep_on_fail:
+                    flash_s = 30
+                if flash_s and flash_s > 0:
+                    try:
+                        await client.send('Runtime.evaluate', {
+                            'expression': _FLASH_JS % (flash_s * 1000, flash_s),
+                        })
+                    except Exception:
+                        pass  # best-effort — page may have crashed
+            else:
                 await client.close_tab()
 
 
