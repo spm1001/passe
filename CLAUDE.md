@@ -66,7 +66,7 @@ Chrome Passe on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--re
 
 ### Tab isolation
 
-`passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on exit. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
+`passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on success. **On failure, the tab is kept open** for debugging — use `passe run --reuse-tab -c "..."` to resume from the failed state. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
 
 ## The DSL
 
@@ -210,7 +210,7 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
 6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
-7. **Tab handling**: `passe run` creates and owns its own tab (closed on exit). Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
+7. **Tab handling**: `passe run` creates its own tab. On success, the tab is closed. **On failure, the tab is kept open** so you can debug — stderr shows `passe run --reuse-tab -c "..."` to resume. Use `--no-keep-on-fail` to force cleanup. `--keep-tab` keeps the tab regardless. Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
 8. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 9. **DOM mutation during TreeWalker**: If using `eval` with `createTreeWalker` to walk and mutate the DOM (e.g. `replaceChild`), the walker loses its position and silently stops after 1-2 nodes. Collect nodes into an array first, then mutate in a second pass.
 10. **Multi-line JS in `eval`**: The DSL is line-based — `eval` takes one line. For multi-line JS, use `eval-file <path>` which reads from a file. Don't minify JS to fit on one line.
@@ -235,6 +235,7 @@ passe fetch https://example.com /tmp/out.md  # Fetch to explicit path
 
 - `PASSE_CDP` — CDP endpoint URL (default `http://localhost:9222`)
 - `PASSE_SCREENSHOT_FAST` — set to any value to default all screenshots to `--fast` (JPEG q70, viewport-only). Override per-screenshot with `--no-fast` when full-page PNG fidelity is needed.
+- `PASSE_HINTS` — set to `0` to suppress all stderr hints. Also available as `--quiet` / `-q` flag on `passe run`.
 
 ## Development
 

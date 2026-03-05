@@ -4,6 +4,11 @@ import json
 import os
 import sys
 
+
+def _hints_enabled():
+    """Check if stderr hints are enabled (PASSE_HINTS != '0')."""
+    return os.environ.get('PASSE_HINTS', '1') != '0'
+
 from passe.connection import connect
 from passe.parser import (
     CONTENT_INLINE_THRESHOLD, parse_screenshot_flags, parse_script,
@@ -64,6 +69,8 @@ def _emit_fetch_hint(steps):
 
     Fires once per script — suggests the fetch compound verb.
     """
+    if not _hints_enabled():
+        return
     hinted_fetch = False
     hinted_wait = False
     for i, (verb, args) in enumerate(steps):
@@ -94,6 +101,8 @@ def _emit_inline_hints(steps, inline_text):
     Fires once per category: complex script (>4 verbs or >200 chars)
     and long eval (eval/eval-to arg >120 chars).
     """
+    if not _hints_enabled():
+        return
     # Hint 1: script complexity
     if len(steps) > 4 or len(inline_text) > 200:
         print('[passe] hint: use heredoc for complex scripts '
@@ -111,6 +120,7 @@ def _emit_inline_hints(steps, inline_text):
 
 async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
+                  keep_on_fail: bool = True,
                   device: str = None, dpr: float = None):
     """Run a passe script from file, stdin, or inline."""
     # --reuse-tab implies --keep-tab (don't close someone else's tab)
@@ -153,15 +163,26 @@ async def cmd_run(source: str, inline: str = None,
         # Apply device preset before script if --device flag used
         if device:
             await do_device(client, device, dpr_override=dpr)
+        script_ok = True
         try:
             summary = await run_script(client, steps)
             summary['cdp'] = conn_info['cdp']
             summary['browser'] = conn_info['browser']
+            script_ok = summary.get('ok', True)
+            if not script_ok and keep_on_fail and not keep_tab:
+                summary['tab_kept'] = True
+                print('[passe] script failed — tab kept open. Resume with: '
+                      'passe run --reuse-tab -c "..."', file=sys.stderr)
             _emit_summary(summary)
             print(json.dumps(summary))
-            sys.exit(0 if summary['ok'] else 1)
+            sys.exit(0 if script_ok else 1)
+        except Exception:
+            # run_script itself threw — no summary available
+            script_ok = False
+            raise
         finally:
-            if not keep_tab:
+            should_close = keep_tab or (not script_ok and keep_on_fail)
+            if not should_close:
                 await client.close_tab()
 
 
@@ -218,6 +239,17 @@ async def cmd_fetch(url: str, path: str = None,
 
             _emit_summary(summary)
             print(json.dumps(summary))
+        except Exception as exc:
+            ms = round((time.monotonic() - t0) * 1000, 1)
+            summary = {
+                'ok': False, 'steps': 1, 'total_ms': ms,
+                'verb': 'fetch', 'error': str(exc),
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            _emit_summary(summary)
+            print(json.dumps(summary))
+            sys.exit(1)
         finally:
             await client.close_tab()
 
