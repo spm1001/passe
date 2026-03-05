@@ -18,6 +18,36 @@ NAV_VERBS = {'goto', 'back', 'forward'}
 RAW_REST_VERBS = {'eval', 'assert', 'log'}
 RAW_REST_AFTER_PATH_VERBS = {'eval-to'}
 
+# Common mistakes → (correct verb, extra hint or None)
+VERB_SUGGESTIONS = {
+    'navigate': ('goto', None),
+    'browse': ('goto', None),
+    'open': ('goto', None),
+    'visit': ('goto', None),
+    'load': ('goto', None),
+    'go': ('goto', None),
+    'input': ('type', None),
+    'enter': ('press', 'use "press Enter" to submit, or "type" to enter text'),
+    'find': ('wait-for', None),
+    'sleep': ('wait', None),
+    'delay': ('wait', None),
+    'pause': ('wait', None),
+    'capture': ('capture', None),  # already valid, but 'screenshot' alias below
+    'shoot': ('screenshot', None),
+    'snap': ('screenshot', None),
+    'print': ('screenshot', None),
+    'extract': ('read', None),
+    'scrape': ('read', None),
+    'get': ('read', 'use "goto" to navigate or "read" to extract content'),
+    'scroll-down': ('scroll', 'scroll uses coordinates: scroll 0 500'),
+    'scroll-up': ('scroll', 'scroll uses coordinates: scroll 0 -500'),
+    'scroll-left': ('scroll', 'scroll uses coordinates: scroll -500 0'),
+    'scroll-right': ('scroll', 'scroll uses coordinates: scroll 500 0'),
+}
+
+# Direction words used as args to scroll (e.g. "scroll down 500")
+SCROLL_DIRECTIONS = {'up', 'down', 'left', 'right'}
+
 
 def split_inline(text: str) -> str:
     """Split inline -c text on '; ' but only when followed by a known verb.

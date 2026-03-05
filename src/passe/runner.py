@@ -7,7 +7,7 @@ import sys
 import time
 
 from passe.client import CDPClient
-from passe.parser import KNOWN_VERBS, NAV_VERBS
+from passe.parser import KNOWN_VERBS, NAV_VERBS, SCROLL_DIRECTIONS, VERB_SUGGESTIONS
 from passe.verbs import (
     do_navigate, do_back, do_forward, do_wait_idle,
     do_click, do_click_text, do_click_if, do_fill, do_type, do_select,
@@ -73,10 +73,16 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
 
     for i, (verb, args) in enumerate(steps):
         if verb not in KNOWN_VERBS:
+            if verb in VERB_SUGGESTIONS:
+                correct, hint = VERB_SUGGESTIONS[verb]
+                fail_error = f'Unknown verb "{verb}" — did you mean "{correct}"?'
+                if hint:
+                    fail_error += f' ({hint})'
+            else:
+                fail_error = f'Unknown verb: {verb}'
             ok = False
             failed_at = i
             fail_verb = verb
-            fail_error = f'Unknown verb: {verb}'
             step_info = {'i': i, 'verb': verb, 'error': fail_error}
             print(json.dumps(step_info), file=sys.stderr)
             break
@@ -114,6 +120,14 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 step_info['start'] = [swipe_result['startX'], swipe_result['startY']]
                 step_info['end'] = [swipe_result['endX'], swipe_result['endY']]
             elif verb == 'scroll':
+                if args and args[0].lower() in SCROLL_DIRECTIONS:
+                    direction = args[0].lower()
+                    dist = args[1] if len(args) > 1 else '500'
+                    coords = {'up': f'0 -{dist}', 'down': f'0 {dist}',
+                              'left': f'-{dist} 0', 'right': f'{dist} 0'}
+                    raise RuntimeError(
+                        f'scroll uses coordinates: scroll {coords[direction]} '
+                        f'(not "scroll {direction} {dist}")')
                 await do_scroll(client, int(args[0]), int(args[1]))
             elif verb == 'screenshot':
                 ss_args = list(args)
