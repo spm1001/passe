@@ -5,7 +5,10 @@ import os
 import sys
 
 from passe.connection import connect
-from passe.parser import CONTENT_INLINE_THRESHOLD, parse_script, split_inline
+from passe.parser import (
+    CONTENT_INLINE_THRESHOLD, parse_screenshot_flags, parse_script,
+    resolve_fetch_output, split_inline,
+)
 from passe.runner import run_script
 from passe.verbs import do_device, do_eval, do_screenshot
 
@@ -186,7 +189,8 @@ async def cmd_fetch(url: str, path: str = None,
             ms = round((time.monotonic() - t0) * 1000, 1)
 
             md = result.get('markdown', '')
-            word_count = len(md.split()) if md else 0
+            word_count, resolved_path = resolve_fetch_output(
+                md, path if explicit_path else None)
 
             summary = {
                 'ok': True, 'steps': 1, 'total_ms': ms,
@@ -196,23 +200,15 @@ async def cmd_fetch(url: str, path: str = None,
             if result.get('nav_url'):
                 summary['final_url'] = result['nav_url']
 
-            if not explicit_path and word_count <= CONTENT_INLINE_THRESHOLD:
-                # Short content — inline in JSON, no file
+            if resolved_path is None:
                 summary['content'] = md
                 summary['word_count'] = word_count
                 summary['source'] = result.get('source')
                 if result.get('content_type'):
                     summary['content_type'] = result['content_type']
             else:
-                # Long content or explicit path — write to file
-                if not explicit_path:
-                    import tempfile
-                    fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
-                    os.close(fd)
-                    with open(path, 'w') as f:
-                        f.write(md)
                 file_entry = {
-                    'path': path, 'verb': 'fetch',
+                    'path': resolved_path, 'verb': 'fetch',
                     'source': result.get('source'),
                     'word_count': word_count,
                 }
@@ -240,31 +236,7 @@ async def _warn_if_blank_page(client):
 
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
     """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
-    no_fast = '--no-fast' in args
-    fast = '--fast' in args
-    if not fast and not no_fast:
-        fast = bool(os.environ.get('PASSE_SCREENSHOT_FAST', ''))
-    viewport_only = '--viewport' in args
-    args = [a for a in args if a not in ('--fast', '--viewport', '--no-fast')]
-    fmt = 'png'
-    quality = None
-    optimize = False
-    if '--format' in args:
-        idx = args.index('--format')
-        if idx + 1 < len(args):
-            fmt = args[idx + 1]
-            del args[idx:idx + 2]
-    if '--quality' in args:
-        idx = args.index('--quality')
-        if idx + 1 < len(args):
-            quality = int(args[idx + 1])
-            del args[idx:idx + 2]
-    if fast:
-        fmt = 'jpeg'
-        quality = quality or 70
-        optimize = True
-        viewport_only = True
-    output = args[0] if args else None
+    output, fmt, quality, viewport_only, optimize = parse_screenshot_flags(args)
     async with connect() as (client, conn_info):
         await client.attach_to_first_page()
         await _warn_if_blank_page(client)
