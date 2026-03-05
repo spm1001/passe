@@ -5,9 +5,9 @@ description: >
   `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
   conventions that prevent malformed scripts and wasted round-trips. Triggers on
   'passe run', 'automate the browser', 'screenshot a page', 'interact with a website',
-  'click a button on', 'fill a form on', 'scrape this page', 'test this page',
-  'capture network requests', 'what API calls does this page make',
-  'reverse-engineer API', 'record network traffic', 'inspect HTTP requests'.
+  'fill a form on', 'scrape this page', 'capture network requests',
+  'what API calls does this page make', 'reverse-engineer API',
+  'look at this page', 'check if this page has', 'verify deployment'.
   For clean article/blog extraction use mise fetch; for DOM-faithful extraction
   (tables, code blocks, technical docs) use passe read. (user)
 requires:
@@ -23,9 +23,11 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 
 | Need | Tool |
 |------|------|
-| Screenshot, interact, test a page | **passe** |
-| Extract content from any web page | **passe** `read` (trafilatura primary, Readability fallback, shadow DOM flattened) |
-| See what API calls a page makes | **passe** `capture` (network requests to JSONL) |
+| Quick visual check of a page | **`passe look URL`** — goto + fast screenshot in one call |
+| Verify a page has expected content | **`passe check URL --contains TEXT`** — deploy verification |
+| See what API calls a page makes | **`passe capture URL path`** — goto + wait + network recording |
+| Extract content from any web page | **`passe fetch URL`** — goto + auto-wait + read |
+| Screenshot, interact, multi-step flows | **`passe run`** — full DSL scripting |
 | Extract Google Workspace content (Drive, Gmail) | `mise fetch` |
 | Full test suites with fixtures | Playwright directly |
 
@@ -41,7 +43,7 @@ These are the most frequent errors from real passe usage across ~455 invocations
 
 | Mistake | Why it's wrong | Do this instead |
 |---------|---------------|-----------------|
-| `passe eval "document.title"` after `passe run` | `run` creates a tab and **destroys it on exit**. The tab is gone. `eval` attaches to the first *existing* tab — which is whatever Sameer has open, not your page. | Put all verbs in one `passe run` script. Use `eval` inside the script, or use `--keep-tab` if you need the tab to survive. |
+| `passe eval "document.title"` after `passe run` | `run` creates a tab and **closes it on success** (on failure it's kept for 30s). `eval` attaches to the first *existing* tab — which is whatever Sameer has open, not your page. | Put all verbs in one `passe run` script. Use `eval` inside the script, or use `--keep-tab` / `--flash` if you need the tab to survive. |
 | `goto URL; wait 1000; read` | `read` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; read` or just `fetch URL` (one verb). |
 | `goto URL; read /tmp/out.md` instead of `fetch` | The `fetch` verb does goto + auto-wait + read in one step and is the ergonomic default. | `passe run -c 'fetch URL /tmp/out.md'` or `passe fetch URL` (top-level subcommand). |
 | Using passe for Google Drive/Gmail content | Passe opens a browser tab. Workspace content needs API access. | Use `mise fetch` for Drive docs, Gmail, Sheets. |
@@ -57,7 +59,7 @@ These are the most frequent errors from real passe usage across ~455 invocations
 
 ## Tab lifecycle (30 words)
 
-`passe run` creates a fresh tab, runs your script, and destroys the tab. Nothing survives exit. To keep the tab: `--keep-tab`. To reuse an existing tab: `--reuse-tab`.
+`passe run` creates a fresh tab, runs your script, and destroys the tab on success. **On failure, the tab is kept open** with a 30s auto-close timer — user interaction (click/keypress/scroll) cancels the timer so the page stays for debugging. Stderr shows `passe run --reuse-tab -c "..."` to resume. To keep the tab permanently: `--keep-tab`. To keep with auto-close: `--flash [secs]` (default 30s). To reuse an existing tab: `--reuse-tab`. To force cleanup on failure: `--no-keep-on-fail`.
 
 ## Chrome connection
 
@@ -103,8 +105,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 ## Verb reference
 
 **Extraction (start here for content):**
-- `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Short content (<2000 words) is inlined in stdout JSON when no path given — no file round-trip needed.
-- `passe fetch <url>` — **top-level subcommand** (parallel to `passe screenshot`, `passe eval`). Same as `passe run -c 'fetch URL'` but with structured output: short content inlined in JSON, long content written to temp file.
+- `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Short content (<2000 words) is inlined in stdout JSON when no path given — no file round-trip needed. Also available as `passe fetch URL` top-level subcommand.
 
 **Navigation:** `goto <url>` — raises on navigation failure (DNS, refused, chrome-error://). Step NDJSON: `url`, `status_code`. `back`, `forward` (step NDJSON: `url`). `scroll <x> <y>` (rarely needed — most verbs work regardless of scroll position)
 
@@ -312,11 +313,14 @@ Passe has three tab modes, controlled by run flags:
 
 | Mode | Flag | Tab lifecycle | Use for |
 |------|------|---------------|---------|
-| **Default** | (none) | Creates new tab → closes on exit | Automation, screenshots — invisible to user |
-| **Keep** | `--keep-tab` | Creates new tab → leaves open | Showing the user a result |
+| **Default** | (none) | Creates new tab → closes on success, **kept with 30s flash on failure** | Automation, screenshots — invisible to user |
+| **Keep** | `--keep-tab` | Creates new tab → leaves open permanently | Showing the user a result |
+| **Flash** | `--flash [secs]` | Creates new tab → leaves open, auto-closes after timeout (default 30s) | Temporary preview — user interaction cancels timer |
 | **Reuse** | `--reuse-tab` | Attaches to existing visible tab → leaves open | User handoff (login flows, OAuth) |
 
-`--reuse-tab` attaches to the first non-chrome:// tab and implies `--keep-tab`. **Warning:** `--reuse-tab` navigates away from whatever the user is looking at — only use when explicitly co-viewing or when you've told the user what's about to happen.
+`--reuse-tab` attaches to the first non-chrome:// tab and implies `--keep-tab`. **Warning:** `--reuse-tab` navigates away from whatever the user is looking at — only use when explicitly co-viewing or when you've told the user what's about to happen. Flash timers are never injected into reused tabs.
+
+`--no-keep-on-fail` reverts to old behavior (close tab on failure). `--quiet` / `-q` suppresses stderr hints (`PASSE_HINTS=0`).
 
 **User handoff pattern** (login required):
 
@@ -333,7 +337,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **`fill` vs `type`**: Default to `type` for SPAs. `fill` is for plain HTML forms only.
 - **Guessing cookie button text**: `click-text "Reject"` fails more often than it works. Scout first.
 - **`click-text` with multiple matches**: Clicks first visible match. Be specific.
-- **Tab handling**: Default mode creates and closes its own tab. Use `--reuse-tab` to attach to the user's visible tab (see Tab modes).
+- **Tab handling**: Default mode creates and closes its own tab on success. On failure, the tab is kept with a 30s flash timer. Use `--reuse-tab` to attach to the user's visible tab (see Tab modes).
 - **Script errors are fatal** but **self-healing on interaction failures**: When `click`, `click-text`, `type`, `fill`, `select`, `hover`, or `tap` fail (e.g. selector not found), passe auto-runs a snapshot and includes the top 10 interactive elements in the error output. Read the error — it tells you what's on the page so you can fix the selector without a separate snapshot call.
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
@@ -341,14 +345,33 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use `wait-idle` (waits for network to settle) or `wait-for <selector>` for a specific element. `wait-idle` is the better default — it's deterministic and replaces guessed delays.
 - **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
-## Atomic commands
+## Subcommands (no DSL needed)
 
-For one-off operations without script overhead:
+Intent-level commands that handle tab lifecycle automatically — no `passe run` wrapper:
 
 ```bash
-passe screenshot /tmp/current.png    # Screenshot whatever's loaded
-passe eval "document.title"          # Quick JS eval
+# See a page (goto + screenshot --fast, always JPEG for Claude's eyes)
+passe look https://example.com                    # → /tmp/passe-look.jpg
+passe look https://example.com /tmp/result.jpg    # explicit path
+
+# Verify a page has expected content (exit 0/1)
+passe check https://example.com --contains "Welcome"
+passe check https://example.com --contains "Dashboard" --screenshot /tmp/proof.jpg
+
+# Record network requests (goto + wait-idle + capture to JSONL)
+passe capture https://spa.example.com /tmp/reqs.jsonl
+passe capture --bodies https://spa.example.com /tmp/reqs.jsonl  # include response bodies
+
+# Extract page content (goto + auto-wait + read)
+passe fetch https://example.com                   # short content inlined in JSON
+passe fetch https://example.com /tmp/content.md   # long content to file
+
+# Observe current page (no navigation, attaches to existing tab)
+passe screenshot /tmp/current.png
+passe eval "document.title"
 ```
+
+All subcommands create+destroy their own tab and emit the same NDJSON+JSON output protocol as `passe run`.
 
 ## Mobile UI development loop
 
