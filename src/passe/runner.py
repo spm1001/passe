@@ -203,16 +203,20 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     print(f'[read] auto-wait: {wait_ms}ms', file=sys.stderr)
                 path = read_args[0] if read_args else None
                 read_result = await do_read(client, path, force_source=force_source)
+                md = read_result.get('markdown', '')
+                word_count = len(md.split()) if md else 0
                 if path:
-                    md = read_result.get('markdown', '')
                     file_entry = {'path': path, 'verb': 'read',
                                   'source': read_result.get('source'),
-                                  'word_count': len(md.split()) if md else 0}
+                                  'word_count': word_count}
                     if read_result.get('content_type'):
                         file_entry['content_type'] = read_result['content_type']
                     files.append(file_entry)
+                elif word_count <= 2000:
+                    step_info['content'] = md
+                    step_info['word_count'] = word_count
                 else:
-                    step_info['result'] = read_result['markdown'][:200]
+                    step_info['result'] = md[:200]
                 if read_result.get('warning'):
                     step_info['warning'] = read_result['warning']
                 if read_result.get('source'):
@@ -234,20 +238,30 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     else:
                         del fetch_args[idx]
                 url = fetch_args[0]
-                path = fetch_args[1] if len(fetch_args) > 1 else None
-                if path is None:
-                    import tempfile
-                    fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
-                    os.close(fd)
-                read_result = await do_fetch(client, url, path, force_source=force_source)
+                explicit_path = fetch_args[1] if len(fetch_args) > 1 else None
+                read_result = await do_fetch(
+                    client, url, explicit_path, force_source=force_source)
                 md = read_result.get('markdown', '')
-                file_entry = {'path': path, 'verb': 'fetch',
-                              'source': read_result.get('source'),
-                              'word_count': len(md.split()) if md else 0}
-                if read_result.get('content_type'):
-                    file_entry['content_type'] = read_result['content_type']
-                files.append(file_entry)
-                step_info['file'] = path
+                word_count = len(md.split()) if md else 0
+                if explicit_path is None and word_count <= 2000:
+                    # Short content — inline in step info, no file
+                    step_info['content'] = md
+                    step_info['word_count'] = word_count
+                else:
+                    path = explicit_path
+                    if path is None:
+                        import tempfile
+                        fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
+                        os.close(fd)
+                        with open(path, 'w') as f:
+                            f.write(md)
+                    file_entry = {'path': path, 'verb': 'fetch',
+                                  'source': read_result.get('source'),
+                                  'word_count': word_count}
+                    if read_result.get('content_type'):
+                        file_entry['content_type'] = read_result['content_type']
+                    files.append(file_entry)
+                    step_info['file'] = path
                 step_info['url'] = read_result.get('nav_url')
                 if read_result.get('nav_status_code') is not None:
                     step_info['status_code'] = read_result['nav_status_code']

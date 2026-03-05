@@ -24,6 +24,11 @@ def _emit_summary(summary):
 
     parts = [f'{steps_n} steps', f'{ms:.0f}ms']
 
+    # Inline content (no file written)
+    if 'content' in summary:
+        wc = summary.get('word_count', 0)
+        parts.append(f'{wc} words (inline)')
+
     files = summary.get('files', [])
     for f in files:
         verb = f.get('verb', '')
@@ -155,6 +160,9 @@ async def cmd_run(source: str, inline: str = None,
                 await client.close_tab()
 
 
+CONTENT_INLINE_THRESHOLD = 2000  # words — include in JSON instead of writing file
+
+
 async def cmd_fetch(url: str, path: str = None,
                     source: str = None, device: str = None, dpr: float = None):
     """Atomic fetch: create tab, goto + auto-wait + read, close tab."""
@@ -163,10 +171,7 @@ async def cmd_fetch(url: str, path: str = None,
 
     from passe.verbs import do_fetch as do_fetch_verb
 
-    if path is None:
-        import tempfile
-        fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
-        os.close(fd)
+    explicit_path = path is not None
 
     async with connect() as (client, conn_info):
         await client.create_tab()
@@ -175,27 +180,48 @@ async def cmd_fetch(url: str, path: str = None,
             await do_device(client, device, dpr_override=dpr)
         try:
             t0 = time.monotonic()
-            result = await do_fetch_verb(client, url, path, force_source=source)
+            # Pass path=None when no explicit path — let do_read skip file write
+            # We'll decide after seeing the content whether to inline or write
+            result = await do_fetch_verb(
+                client, url, path if explicit_path else None,
+                force_source=source,
+            )
             ms = round((time.monotonic() - t0) * 1000, 1)
 
             md = result.get('markdown', '')
             word_count = len(md.split()) if md else 0
-            file_entry = {
-                'path': path, 'verb': 'fetch',
-                'source': result.get('source'),
-                'word_count': word_count,
-            }
-            if result.get('content_type'):
-                file_entry['content_type'] = result['content_type']
 
             summary = {
                 'ok': True, 'steps': 1, 'total_ms': ms,
-                'files': [file_entry],
                 'cdp': conn_info['cdp'],
                 'browser': conn_info['browser'],
             }
             if result.get('nav_url'):
                 summary['final_url'] = result['nav_url']
+
+            if not explicit_path and word_count <= CONTENT_INLINE_THRESHOLD:
+                # Short content — inline in JSON, no file
+                summary['content'] = md
+                summary['word_count'] = word_count
+                summary['source'] = result.get('source')
+                if result.get('content_type'):
+                    summary['content_type'] = result['content_type']
+            else:
+                # Long content or explicit path — write to file
+                if not explicit_path:
+                    import tempfile
+                    fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
+                    os.close(fd)
+                    with open(path, 'w') as f:
+                        f.write(md)
+                file_entry = {
+                    'path': path, 'verb': 'fetch',
+                    'source': result.get('source'),
+                    'word_count': word_count,
+                }
+                if result.get('content_type'):
+                    file_entry['content_type'] = result['content_type']
+                summary['files'] = [file_entry]
 
             _emit_summary(summary)
             print(json.dumps(summary))
