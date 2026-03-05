@@ -1,13 +1,17 @@
 """Script execution engine — dispatches verbs to action functions."""
 
 import asyncio
+import base64
 import json
 import os
 import sys
 import time
 
 from passe.client import CDPClient
-from passe.parser import KNOWN_VERBS, NAV_VERBS, SCROLL_DIRECTIONS, VERB_SUGGESTIONS
+from passe.parser import (
+    CONTENT_INLINE_THRESHOLD, KNOWN_VERBS, NAV_VERBS,
+    SCROLL_DIRECTIONS, VERB_SUGGESTIONS,
+)
 from passe.verbs import (
     do_navigate, do_back, do_forward, do_wait_idle,
     do_click, do_click_text, do_click_if, do_fill, do_type, do_select,
@@ -216,7 +220,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     if read_result.get('content_type'):
                         file_entry['content_type'] = read_result['content_type']
                     files.append(file_entry)
-                elif word_count <= 2000:
+                elif word_count <= CONTENT_INLINE_THRESHOLD:
                     step_info['content'] = md
                     step_info['word_count'] = word_count
                 else:
@@ -247,7 +251,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     client, url, explicit_path, force_source=force_source)
                 md = read_result.get('markdown', '')
                 word_count = len(md.split()) if md else 0
-                if explicit_path is None and word_count <= 2000:
+                if explicit_path is None and word_count <= CONTENT_INLINE_THRESHOLD:
                     # Short content — inline in step info, no file
                     step_info['content'] = md
                     step_info['word_count'] = word_count
