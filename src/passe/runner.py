@@ -145,7 +145,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'screenshot':
                 path, ss_fmt, ss_quality, viewport_only, ss_optimize = (
                     parse_screenshot_flags(args))
-                if prev_verb == 'scroll' and not viewport_only:
+                if (prev_verb == 'scroll' and not viewport_only
+                        and os.environ.get('PASSE_HINTS', '1') != '0'):
                     print(
                         '[screenshot] hint: screenshot is full-page by default'
                         ' (max 16384px) — scroll before screenshot is usually'

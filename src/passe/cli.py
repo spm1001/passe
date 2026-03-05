@@ -12,6 +12,7 @@ Commands:
 """
 
 import asyncio
+import os
 import sys
 
 from passe.connection import set_cdp_override
@@ -75,6 +76,8 @@ Global flags:
 Run flags:
   --keep-tab        Keep tab open after script
   --reuse-tab       Attach to existing visible tab (implies --keep-tab)
+  --no-keep-on-fail Close tab even when script fails (default: keep on failure)
+  --quiet           Suppress stderr hints (same as PASSE_HINTS=0)
 
 Screenshot flags:
   --fast            JPEG q70, viewport-only, optimizeForSpeed
@@ -86,6 +89,7 @@ Screenshot flags:
 Environment:
   PASSE_CDP               CDP endpoint (default http://localhost:9222)
   PASSE_SCREENSHOT_FAST   Default to --fast for all screenshots
+  PASSE_HINTS             Set to 0 to suppress stderr hints
 
 Use 'passe run --help' for the verb reference.
 """
@@ -191,17 +195,25 @@ def main():
             sys.exit(0)
         keep_tab = '--keep-tab' in run_args
         reuse_tab = '--reuse-tab' in run_args
-        run_args = [a for a in run_args if a not in ('--keep-tab', '--reuse-tab')]
+        no_keep_on_fail = '--no-keep-on-fail' in run_args
+        quiet = '--quiet' in run_args or '-q' in run_args
+        if quiet:
+            os.environ['PASSE_HINTS'] = '0'
+        run_args = [a for a in run_args
+                    if a not in ('--keep-tab', '--reuse-tab',
+                                 '--no-keep-on-fail', '--quiet', '-q')]
 
         if len(run_args) >= 2 and run_args[0] == '-c':
             # passe run [-flags] -c 'inline script'
             _run(cmd_run(None, inline=' '.join(run_args[1:]),
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                keep_on_fail=not no_keep_on_fail,
                                 device=device_name, dpr=dpr_val))
         elif len(run_args) == 1:
             # passe run [-flags] script.passe  OR  passe run [-flags] -
             _run(cmd_run(run_args[0],
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                keep_on_fail=not no_keep_on_fail,
                                 device=device_name, dpr=dpr_val))
         else:
             print(USAGE, file=sys.stderr)
