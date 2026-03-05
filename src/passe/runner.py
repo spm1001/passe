@@ -24,6 +24,14 @@ from passe.verbs import (
 )
 
 
+# Verbs where a failure should auto-snapshot to show what's on the page.
+# These are interaction verbs that target selectors — if the selector doesn't
+# match, showing available elements saves a round-trip.
+_SNAPSHOT_ON_FAIL_VERBS = {
+    'click', 'click-text', 'type', 'fill', 'select', 'hover', 'tap',
+}
+
+
 def _build_capture_summary(requests: list[dict]) -> dict:
     """Build a summary of captured network requests for step NDJSON."""
     by_type: dict[str, int] = {}
@@ -344,6 +352,24 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             failed_at = i
             fail_verb = verb
             fail_error = str(e)
+            # Self-healing: snapshot on interaction verb failure
+            if verb in _SNAPSHOT_ON_FAIL_VERBS:
+                try:
+                    snap_text = await do_snapshot(client)
+                    lines = snap_text.strip().splitlines()[:10]
+                    if lines:
+                        step_info['elements'] = lines
+                        compact = '; '.join(
+                            ln.split(' css=')[0].lstrip('[0123456789] ')
+                            for ln in lines
+                        )
+                        print(
+                            f'[passe] {verb} failed: {e}\n'
+                            f'[passe] Page has: {compact}',
+                            file=sys.stderr,
+                        )
+                except Exception:
+                    pass  # Never let recovery crash the error path
             print(json.dumps(step_info), file=sys.stderr)
             break
 
