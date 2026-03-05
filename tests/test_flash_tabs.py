@@ -160,6 +160,48 @@ async def test_keep_tab_without_flash_no_timer():
     assert len(eval_calls) == 0
 
 
+# ── --reuse-tab guard: never flash someone else's tab ─────────────
+
+
+@pytest.mark.asyncio
+async def test_reuse_tab_no_flash():
+    """--reuse-tab skips flash timer even with explicit --flash."""
+    client = _make_client()
+    ok_summary = {'ok': True, 'steps': 1, 'total_ms': 50}
+
+    with patch('passe.commands.connect', _mock_connect(client)), \
+         patch('passe.commands.run_script', AsyncMock(return_value=ok_summary)), \
+         patch('sys.stdout', new_callable=StringIO), \
+         pytest.raises(SystemExit):
+        await cmd_run(None, inline='goto https://example.com',
+                      reuse_tab=True, flash=30)
+
+    eval_calls = [c for c in client.send.call_args_list
+                  if c[0][0] == 'Runtime.evaluate']
+    assert len(eval_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_reuse_tab_failure_no_flash():
+    """--reuse-tab failure doesn't flash the tab."""
+    client = _make_client()
+    failed_summary = {'ok': False, 'steps': 1, 'total_ms': 10,
+                      'verb': 'click', 'error': 'not found',
+                      'failed_at': 0}
+
+    with patch('passe.commands.connect', _mock_connect(client)), \
+         patch('passe.commands.run_script', AsyncMock(return_value=failed_summary)), \
+         patch('sys.stdout', new_callable=StringIO), \
+         patch('sys.stderr', new_callable=StringIO), \
+         pytest.raises(SystemExit):
+        await cmd_run(None, inline='goto https://example.com',
+                      reuse_tab=True)
+
+    eval_calls = [c for c in client.send.call_args_list
+                  if c[0][0] == 'Runtime.evaluate']
+    assert len(eval_calls) == 0
+
+
 # ── Exception path with flash ─────────────────────────────────────
 
 
