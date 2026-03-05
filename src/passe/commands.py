@@ -200,7 +200,7 @@ async def cmd_run(source: str, inline: str = None,
                 flash_s = flash
                 if flash_s is None and not script_ok and keep_on_fail:
                     flash_s = 30
-                if flash_s and flash_s > 0:
+                if flash_s and flash_s > 0 and not reuse_tab:
                     try:
                         await client.send('Runtime.evaluate', {
                             'expression': _FLASH_JS % (flash_s * 1000, flash_s),
