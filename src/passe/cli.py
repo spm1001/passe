@@ -15,7 +15,7 @@ import asyncio
 import sys
 
 from passe.connection import set_cdp_override
-from passe.commands import cmd_run, cmd_screenshot, cmd_eval, cmd_devices
+from passe.commands import cmd_run, cmd_fetch, cmd_screenshot, cmd_eval, cmd_devices
 
 # ── Re-exports for backward compatibility ─────────────────
 # Tests and external code import these from passe.cli.
@@ -62,6 +62,7 @@ Commands:
   passe run -c 'verbs...'         Run inline script
   passe run script.passe          Run script file
   passe run - <<'EOF' ... EOF     Run from stdin
+  passe fetch <url> [flags] [path] Fetch and extract page content
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
   passe devices                   List available device presets
@@ -200,6 +201,13 @@ def main():
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
+    elif cmd == 'fetch' and len(all_args) >= 2:
+        fetch_args = all_args[1:]
+        source_val, fetch_args = _extract_flag(fetch_args, '--source')
+        url = fetch_args[0]
+        path = fetch_args[1] if len(fetch_args) > 1 else None
+        _run(cmd_fetch(url, path=path, source=source_val,
+                       device=device_name, dpr=dpr_val))
     elif cmd == 'screenshot' and len(all_args) >= 2:
         _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val))
     elif cmd == 'eval' and len(all_args) >= 2:
