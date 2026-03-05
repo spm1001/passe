@@ -5,7 +5,7 @@ import os
 import sys
 
 from passe.connection import connect
-from passe.parser import parse_script, split_inline
+from passe.parser import CONTENT_INLINE_THRESHOLD, parse_script, split_inline
 from passe.runner import run_script
 from passe.verbs import do_device, do_eval, do_screenshot
 
@@ -23,7 +23,8 @@ def _emit_summary(summary):
               file=sys.stderr)
         return
 
-    parts = [f'{steps_n} steps', f'{ms:.0f}ms']
+    step_word = 'step' if steps_n == 1 else 'steps'
+    parts = [f'{steps_n} {step_word}', f'{ms:.0f}ms']
 
     # Inline content (no file written)
     if 'content' in summary:
@@ -161,15 +162,10 @@ async def cmd_run(source: str, inline: str = None,
                 await client.close_tab()
 
 
-CONTENT_INLINE_THRESHOLD = 2000  # words — include in JSON instead of writing file
-
-
 async def cmd_fetch(url: str, path: str = None,
                     source: str = None, device: str = None, dpr: float = None):
     """Atomic fetch: create tab, goto + auto-wait + read, close tab."""
-    import os
     import time
-
     from passe.verbs import do_fetch as do_fetch_verb
 
     explicit_path = path is not None

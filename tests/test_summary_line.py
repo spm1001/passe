@@ -80,4 +80,4 @@ def test_failure():
 
 def test_success_no_files():
     line = _capture({'ok': True, 'steps': 1, 'total_ms': 50})
-    assert '[passe] done: 1 steps, 50ms' in line
+    assert '[passe] done: 1 step, 50ms' in line

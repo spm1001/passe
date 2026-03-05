@@ -2,6 +2,10 @@
 
 import shlex
 
+# Content shorter than this (in words) is inlined in JSON output
+# rather than written to a file. Used by both cmd_fetch and run_script.
+CONTENT_INLINE_THRESHOLD = 2000
+
 
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
@@ -32,7 +36,6 @@ VERB_SUGGESTIONS = {
     'sleep': ('wait', None),
     'delay': ('wait', None),
     'pause': ('wait', None),
-    'capture': ('capture', None),  # already valid, but 'screenshot' alias below
     'shoot': ('screenshot', None),
     'snap': ('screenshot', None),
     'print': ('screenshot', None),
