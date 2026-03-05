@@ -52,6 +52,66 @@ VERB_SUGGESTIONS = {
 SCROLL_DIRECTIONS = {'up', 'down', 'left', 'right'}
 
 
+def resolve_fetch_output(markdown: str, explicit_path: str | None):
+    """Decide whether fetch content should be inlined or written to a file.
+
+    Returns (word_count, path_or_none).
+    - If inlined: path_or_none is None (caller should use markdown directly)
+    - If file: path_or_none is the path (explicit or auto-created temp file)
+    """
+    import os
+    import tempfile
+    word_count = len(markdown.split()) if markdown else 0
+    if explicit_path is None and word_count <= CONTENT_INLINE_THRESHOLD:
+        return word_count, None
+    # Write to file
+    path = explicit_path
+    if path is None:
+        fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
+        os.close(fd)
+        with open(path, 'w') as f:
+            f.write(markdown)
+    return word_count, path
+
+
+def parse_screenshot_flags(args: list[str]) -> tuple[str | None, str, int | None, bool, bool]:
+    """Parse screenshot flags from an argument list.
+
+    Returns (path, fmt, quality, viewport_only, optimize_speed).
+    Handles --fast, --no-fast, --viewport, --format, --quality,
+    and the PASSE_SCREENSHOT_FAST env var.
+    """
+    import os
+    remaining = list(args)
+    viewport_only = '--viewport' in remaining
+    no_fast = '--no-fast' in remaining
+    fast = '--fast' in remaining
+    if not fast and not no_fast:
+        fast = bool(os.environ.get('PASSE_SCREENSHOT_FAST', ''))
+    remaining = [a for a in remaining
+                 if a not in ('--viewport', '--fast', '--no-fast')]
+    fmt = 'png'
+    quality = None
+    optimize = False
+    if '--format' in remaining:
+        idx = remaining.index('--format')
+        if idx + 1 < len(remaining):
+            fmt = remaining[idx + 1]
+            del remaining[idx:idx + 2]
+    if '--quality' in remaining:
+        idx = remaining.index('--quality')
+        if idx + 1 < len(remaining):
+            quality = int(remaining[idx + 1])
+            del remaining[idx:idx + 2]
+    if fast:
+        fmt = 'jpeg'
+        quality = quality or 70
+        optimize = True
+        viewport_only = True
+    path = remaining[0] if remaining else None
+    return path, fmt, quality, viewport_only, optimize
+
+
 def split_inline(text: str) -> str:
     """Split inline -c text on '; ' but only when followed by a known verb.
 

@@ -10,6 +10,7 @@ import time
 from passe.client import CDPClient
 from passe.parser import (
     CONTENT_INLINE_THRESHOLD, KNOWN_VERBS, NAV_VERBS,
+    parse_screenshot_flags, resolve_fetch_output,
     SCROLL_DIRECTIONS, VERB_SUGGESTIONS,
 )
 from passe.verbs import (
@@ -134,40 +135,14 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                         f'(not "scroll {direction} {dist}")')
                 await do_scroll(client, int(args[0]), int(args[1]))
             elif verb == 'screenshot':
-                ss_args = list(args)
-                # Parse screenshot flags
-                viewport_only = '--viewport' in ss_args
-                no_fast = '--no-fast' in ss_args
-                fast = '--fast' in ss_args
-                if not fast and not no_fast:
-                    fast = bool(os.environ.get('PASSE_SCREENSHOT_FAST', ''))
-                ss_args = [a for a in ss_args
-                           if a not in ('--viewport', '--fast', '--no-fast')]
-                ss_fmt = 'png'
-                ss_quality = None
-                ss_optimize = False
-                if '--format' in ss_args:
-                    idx = ss_args.index('--format')
-                    if idx + 1 < len(ss_args):
-                        ss_fmt = ss_args[idx + 1]
-                        del ss_args[idx:idx + 2]
-                if '--quality' in ss_args:
-                    idx = ss_args.index('--quality')
-                    if idx + 1 < len(ss_args):
-                        ss_quality = int(ss_args[idx + 1])
-                        del ss_args[idx:idx + 2]
-                if fast:
-                    ss_fmt = 'jpeg'
-                    ss_quality = ss_quality or 70
-                    ss_optimize = True
-                    viewport_only = True
+                path, ss_fmt, ss_quality, viewport_only, ss_optimize = (
+                    parse_screenshot_flags(args))
                 if prev_verb == 'scroll' and not viewport_only:
                     print(
                         '[screenshot] hint: screenshot is full-page by default'
                         ' (max 16384px) — scroll before screenshot is usually'
                         ' unnecessary', file=sys.stderr,
                     )
-                path = ss_args[0] if ss_args else None
                 info = await do_screenshot(
                     client, path, viewport_only=viewport_only,
                     fmt=ss_fmt, quality=ss_quality, optimize_speed=ss_optimize,
@@ -250,26 +225,19 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 read_result = await do_fetch(
                     client, url, explicit_path, force_source=force_source)
                 md = read_result.get('markdown', '')
-                word_count = len(md.split()) if md else 0
-                if explicit_path is None and word_count <= CONTENT_INLINE_THRESHOLD:
-                    # Short content — inline in step info, no file
+                word_count, resolved_path = resolve_fetch_output(
+                    md, explicit_path)
+                if resolved_path is None:
                     step_info['content'] = md
                     step_info['word_count'] = word_count
                 else:
-                    path = explicit_path
-                    if path is None:
-                        import tempfile
-                        fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
-                        os.close(fd)
-                        with open(path, 'w') as f:
-                            f.write(md)
-                    file_entry = {'path': path, 'verb': 'fetch',
+                    file_entry = {'path': resolved_path, 'verb': 'fetch',
                                   'source': read_result.get('source'),
                                   'word_count': word_count}
                     if read_result.get('content_type'):
                         file_entry['content_type'] = read_result['content_type']
                     files.append(file_entry)
-                    step_info['file'] = path
+                    step_info['file'] = resolved_path
                 step_info['url'] = read_result.get('nav_url')
                 if read_result.get('nav_status_code') is not None:
                     step_info['status_code'] = read_result['nav_status_code']
