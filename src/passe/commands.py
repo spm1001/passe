@@ -155,6 +155,54 @@ async def cmd_run(source: str, inline: str = None,
                 await client.close_tab()
 
 
+async def cmd_fetch(url: str, path: str = None,
+                    source: str = None, device: str = None, dpr: float = None):
+    """Atomic fetch: create tab, goto + auto-wait + read, close tab."""
+    import os
+    import time
+
+    from passe.verbs import do_fetch as do_fetch_verb
+
+    if path is None:
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix='.md', prefix='passe-fetch-')
+        os.close(fd)
+
+    async with connect() as (client, conn_info):
+        await client.create_tab()
+        await client.send('Page.enable')
+        if device:
+            await do_device(client, device, dpr_override=dpr)
+        try:
+            t0 = time.monotonic()
+            result = await do_fetch_verb(client, url, path, force_source=source)
+            ms = round((time.monotonic() - t0) * 1000, 1)
+
+            md = result.get('markdown', '')
+            word_count = len(md.split()) if md else 0
+            file_entry = {
+                'path': path, 'verb': 'fetch',
+                'source': result.get('source'),
+                'word_count': word_count,
+            }
+            if result.get('content_type'):
+                file_entry['content_type'] = result['content_type']
+
+            summary = {
+                'ok': True, 'steps': 1, 'total_ms': ms,
+                'files': [file_entry],
+                'cdp': conn_info['cdp'],
+                'browser': conn_info['browser'],
+            }
+            if result.get('nav_url'):
+                summary['final_url'] = result['nav_url']
+
+            _emit_summary(summary)
+            print(json.dumps(summary))
+        finally:
+            await client.close_tab()
+
+
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
     """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
     fast = '--fast' in args
