@@ -237,9 +237,11 @@ passe fetch https://example.com /tmp/out.md  # Explicit path
 
 passe screenshot /tmp/current-page.png       # Screenshot current page (no navigation)
 passe eval "document.title"                  # Quick JS eval on current page
+
+passe explain -c 'goto URL; click .btn'      # Dry-run: validate without executing
 ```
 
-`look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation.
+`look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only.
 
 ### Environment variables
 

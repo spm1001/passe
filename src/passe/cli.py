@@ -17,7 +17,7 @@ import sys
 
 from passe.connection import set_cdp_override
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
-                            cmd_screenshot, cmd_eval, cmd_devices)
+                            cmd_explain, cmd_screenshot, cmd_eval, cmd_devices)
 
 # ── Re-exports for backward compatibility ─────────────────
 # Tests and external code import these from passe.cli.
@@ -70,6 +70,7 @@ Commands:
   passe fetch <url> [flags] [path] Fetch and extract page content
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
+  passe explain -c 'verbs...'     Dry-run: validate script without executing
   passe devices                   List available device presets
 
 Global flags:
@@ -275,6 +276,16 @@ def main():
         path = fetch_args[1] if len(fetch_args) > 1 else None
         _run(cmd_fetch(url, path=path, source=source_val,
                        device=device_name, dpr=dpr_val))
+    elif cmd == 'explain':
+        explain_args = all_args[1:]
+        if len(explain_args) >= 2 and explain_args[0] == '-c':
+            cmd_explain(None, inline=' '.join(explain_args[1:]))
+        elif len(explain_args) == 1:
+            cmd_explain(explain_args[0])
+        else:
+            print('Usage: passe explain -c "script" | passe explain file.passe | passe explain -',
+                  file=sys.stderr)
+            sys.exit(1)
     elif cmd == 'screenshot' and len(all_args) >= 2:
         _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val))
     elif cmd == 'eval' and len(all_args) >= 2:

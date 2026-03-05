@@ -11,8 +11,9 @@ def _hints_enabled():
 
 from passe.connection import connect
 from passe.parser import (
-    CONTENT_INLINE_THRESHOLD, parse_screenshot_flags, parse_script,
-    resolve_fetch_output, split_inline,
+    CONTENT_INLINE_THRESHOLD, KNOWN_VERBS, VERB_SUGGESTIONS,
+    parse_screenshot_flags, parse_script,
+    resolve_fetch_output, split_inline, validate_steps,
 )
 from passe.runner import run_script
 from passe.verbs import do_device, do_eval, do_screenshot
@@ -448,6 +449,106 @@ async def cmd_capture(url: str, path: str, bodies: bool = False,
             sys.exit(1)
         finally:
             await client.close_tab()
+
+
+def cmd_explain(source: str, inline: str = None):
+    """Dry-run: parse and validate a script without executing it."""
+    # Parse input (same as cmd_run)
+    if inline is not None:
+        text = split_inline(inline)
+    elif source == '-':
+        text = sys.stdin.read()
+    else:
+        with open(source) as f:
+            text = f.read()
+
+    steps = parse_script(text)
+    if not steps:
+        print(json.dumps({'ok': True, 'steps': 0, 'errors': [], 'warnings': []}))
+        return
+
+    # Validate
+    errors = validate_steps(steps)
+    warnings = []
+
+    # Analyse: collect metadata
+    verbs_used = [v for v, _ in steps]
+    selectors = []
+    files_created = []
+    urls = []
+
+    for verb, args in steps:
+        if verb in ('click', 'click-if', 'hover', 'tap', 'type', 'fill',
+                     'select', 'wait-for') and args:
+            selectors.append(args[0])
+        if verb in ('click-text',) and args:
+            selectors.append(f'text:{args[0]}')
+        if verb == 'goto' and args:
+            urls.append(args[0])
+        if verb == 'fetch' and args:
+            fetch_args = [a for a in args if not a.startswith('--')]
+            if fetch_args:
+                urls.append(fetch_args[0])
+        if verb in ('screenshot', 'snapshot', 'read', 'fetch') and args:
+            clean = [a for a in args if not a.startswith('--')]
+            if clean:
+                files_created.append({'verb': verb, 'path': clean[-1]
+                                      if verb != 'fetch' else
+                                      (clean[1] if len(clean) > 1 else None)})
+        if verb == 'eval-to' and len(args) >= 1:
+            files_created.append({'verb': verb, 'path': args[0]})
+        if verb == 'eval-file-to' and len(args) >= 1:
+            files_created.append({'verb': verb, 'path': args[0]})
+        if verb == 'capture' and args:
+            clean = [a for a in args if not a.startswith('--')]
+            if clean:
+                files_created.append({'verb': verb, 'path': clean[0]})
+
+    # Reuse hint logic: goto+read pattern, inline complexity, long evals
+    for i, (verb, args) in enumerate(steps):
+        if verb != 'goto':
+            continue
+        j = i + 1
+        saw_wait = False
+        while j < len(steps) and steps[j][0] == 'wait':
+            saw_wait = True
+            j += 1
+        if j < len(steps) and steps[j][0] == 'read':
+            warnings.append('goto+read detected — use fetch verb instead '
+                            '(goto + auto-wait + read in one step)')
+            if saw_wait:
+                warnings.append('Explicit wait before read is unnecessary — '
+                                'read auto-waits after navigation verbs')
+    if inline:
+        if len(steps) > 4 or len(inline) > 200:
+            warnings.append('Complex inline script — use heredoc for 5+ verbs')
+        for verb, args in steps:
+            if verb in ('eval', 'eval-to', 'assert') and args:
+                expr = args[-1]
+                if len(expr) > 120:
+                    warnings.append(f'Long {verb} expression ({len(expr)} chars) '
+                                    f'— use eval-file instead')
+
+    # Capture position warning
+    for i, (verb, _) in enumerate(steps):
+        if verb == 'capture' and i > 0:
+            warnings.append('capture is not the first verb — '
+                            'network requests from earlier steps will be missed')
+
+    files_created = [f for f in files_created if f.get('path')]
+
+    result = {
+        'ok': len(errors) == 0,
+        'steps': len(steps),
+        'verbs': verbs_used,
+        'urls': urls,
+        'selectors': selectors,
+        'files': files_created,
+        'errors': errors,
+        'warnings': warnings,
+    }
+    print(json.dumps(result))
+    sys.exit(0 if not errors else 1)
 
 
 async def _warn_if_blank_page(client):
