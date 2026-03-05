@@ -58,6 +58,10 @@ def resolve_fetch_output(markdown: str, explicit_path: str | None):
     Returns (word_count, path_or_none).
     - If inlined: path_or_none is None (caller should use markdown directly)
     - If file: path_or_none is the path (explicit or auto-created temp file)
+
+    Lives in parser.py (not commands/runner) because both cmd_fetch and
+    run_script's fetch verb need it — parser.py is the shared-logic module
+    (also owns CONTENT_INLINE_THRESHOLD).
     """
     import os
     import tempfile
