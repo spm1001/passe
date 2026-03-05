@@ -334,7 +334,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **Guessing cookie button text**: `click-text "Reject"` fails more often than it works. Scout first.
 - **`click-text` with multiple matches**: Clicks first visible match. Be specific.
 - **Tab handling**: Default mode creates and closes its own tab. Use `--reuse-tab` to attach to the user's visible tab (see Tab modes).
-- **Script errors are fatal**: No mid-script recovery. Partial timing still emitted to stderr.
+- **Script errors are fatal** but **self-healing on interaction failures**: When `click`, `click-text`, `type`, `fill`, `select`, `hover`, or `tap` fail (e.g. selector not found), passe auto-runs a snapshot and includes the top 10 interactive elements in the error output. Read the error — it tells you what's on the page so you can fix the selector without a separate snapshot call.
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.

@@ -463,9 +463,15 @@ async def do_screenshot(client: CDPClient, path: str = None,
     }
 
 
-async def do_snapshot(client: CDPClient, path: str = None) -> str:
-    """List interactive elements with CSS selectors."""
-    js = r'''(() => {
+async def do_snapshot(client: CDPClient, path: str = None,
+                      limit: int = 0) -> str:
+    """List interactive elements with CSS selectors.
+
+    limit: max elements to return (0 = unlimited). When set, the JS stops
+    scanning after finding enough visible elements — avoids wasted work on
+    heavy pages (used by self-healing snapshot on error).
+    """
+    js = r'''((limit) => {
         const results = [];
         const interactives = document.querySelectorAll(
             'a, button, input, select, textarea, [role="button"], [role="link"], ' +
@@ -473,6 +479,7 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
         );
         let idx = 0;
         for (const el of interactives) {
+            if (limit > 0 && idx >= limit) break;
             // Skip invisible elements
             if (el.offsetParent === null && el.tagName !== 'BODY' &&
                 getComputedStyle(el).position !== 'fixed') continue;
@@ -514,7 +521,7 @@ async def do_snapshot(client: CDPClient, path: str = None) -> str:
             idx++;
         }
         return results.join('\n');
-    })()'''
+    })(''' + str(limit) + ')'
     result = await client.send('Runtime.evaluate', {
         'expression': js, 'awaitPromise': False
     })

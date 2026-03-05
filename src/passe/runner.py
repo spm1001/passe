@@ -355,7 +355,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             # Self-healing: snapshot on interaction verb failure
             if verb in _SNAPSHOT_ON_FAIL_VERBS:
                 try:
-                    snap_text = await do_snapshot(client)
+                    snap_text = await do_snapshot(client, limit=10)
                     lines = snap_text.strip().splitlines()[:10]
                     if lines:
                         step_info['elements'] = lines
