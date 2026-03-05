@@ -35,6 +35,30 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 
 - **Complex test frameworks with fixtures and assertions** — use Playwright directly
 
+## Common Claude mistakes
+
+These are the most frequent errors from real passe usage across ~455 invocations. Read before writing any passe command.
+
+| Mistake | Why it's wrong | Do this instead |
+|---------|---------------|-----------------|
+| `passe eval "document.title"` after `passe run` | `run` creates a tab and **destroys it on exit**. The tab is gone. `eval` attaches to the first *existing* tab — which is whatever Sameer has open, not your page. | Put all verbs in one `passe run` script. Use `eval` inside the script, or use `--keep-tab` if you need the tab to survive. |
+| `goto URL; wait 1000; read` | `read` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; read` or just `fetch URL` (one verb). |
+| `goto URL; read /tmp/out.md` instead of `fetch` | The `fetch` verb does goto + auto-wait + read in one step and is the ergonomic default. | `passe run -c 'fetch URL /tmp/out.md'` or `passe fetch URL` (top-level subcommand). |
+| Using passe for Google Drive/Gmail content | Passe opens a browser tab. Workspace content needs API access. | Use `mise fetch` for Drive docs, Gmail, Sheets. |
+| `passe run -c 'goto URL; click sel; type sel text; wait 500; screenshot /tmp/out.png; read /tmp/content.md'` | Monster inline one-liners are unreadable and error-prone. The CLI warns at >4 verbs or >200 chars. | Use heredoc for 5+ verbs. |
+| Chasing "doubled output" from passe | This is a Claude Code Bash tool quirk — non-zero exit codes replay output. Not a passe bug. | Check the exit code. If passe failed, read the error. Don't debug the duplication. |
+| `scroll down 500` | Passe uses `scroll <x> <y>` (pixel coordinates), not natural language directions. | `scroll 0 500` |
+
+## DO NOT
+
+1. **DO NOT run `passe eval` or `passe screenshot` expecting to see your `passe run` page.** The tab is gone. Put everything in one script.
+2. **DO NOT add `wait` before `read` after a `goto`.** Auto-wait handles this. Use `fetch` for the common case.
+3. **DO NOT use passe for Google Workspace content.** Use `mise fetch` for Drive, Gmail, Sheets.
+
+## Tab lifecycle (30 words)
+
+`passe run` creates a fresh tab, runs your script, and destroys the tab. Nothing survives exit. To keep the tab: `--keep-tab`. To reuse an existing tab: `--reuse-tab`.
+
 ## Chrome connection
 
 Passe connects to Chrome on port 9222. Two modes:
@@ -78,6 +102,10 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 ## Verb reference
 
+**Extraction (start here for content):**
+- `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Short content (<2000 words) is inlined in stdout JSON when no path given — no file round-trip needed.
+- `passe fetch <url>` — **top-level subcommand** (parallel to `passe screenshot`, `passe eval`). Same as `passe run -c 'fetch URL'` but with structured output: short content inlined in JSON, long content written to temp file.
+
 **Navigation:** `goto <url>` — raises on navigation failure (DNS, refused, chrome-error://). Step NDJSON: `url`, `status_code`. `back`, `forward` (step NDJSON: `url`). `scroll <x> <y>` (rarely needed — most verbs work regardless of scroll position)
 
 **Interaction:**
@@ -93,10 +121,9 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `swipe <selector> <direction> [distance]` — swipe gesture (left/right/up/down, default 200px)
 
 **Observation:**
-- `screenshot [--fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
+- `screenshot [--fast] [--no-fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. **`PASSE_SCREENSHOT_FAST` env var** defaults all screenshots to `--fast`; override with `--no-fast` when you need full-page PNG fidelity. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
 - `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
-- `fetch <url> [--source extractor] [path]` — **compound verb: goto + auto-wait + read**. The default for research/extraction. Path optional (auto temp file if omitted). Reports `file`, `final_url`, `source` in step output. Prefer this over `goto; wait; read`.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
