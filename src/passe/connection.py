@@ -157,6 +157,11 @@ async def connect(port=9222):
         # Rewrite WS URL — Chrome returns ws://localhost:... which won't work remotely
         parsed_ws = urlparse(ws_url)
         ws_url = f'ws://{parsed_base.netloc}{parsed_ws.path}'
+    elif chrome_proc is not None:
+        print(f'[passe] Chrome: {browser_str} (bare profile — no auth cookies)',
+              file=sys.stderr)
+        print('[passe] hint: for authenticated browsing, start Chrome with '
+              'your profile first', file=sys.stderr)
     else:
         print(f'[passe] Chrome: {browser_str}', file=sys.stderr)
 
