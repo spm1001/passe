@@ -104,6 +104,9 @@ passe run tests/checkout-flow.passe
 
 ### Verb reference
 
+**Extraction (start here for content):**
+- `fetch <url> [--source extractor] [path]` — compound verb: `goto` + auto-wait + `read` in one step. The default for research/extraction workflows. Path optional — if omitted, writes to a temp file and reports the path in step output. Short content (<2000 words) is inlined in stdout JSON when no path given. Passes through `--source` flag to the read cascade.
+
 **Navigation:**
 - `goto <url>` — navigate and wait for load. Step NDJSON includes `url` (final URL after redirects) and `status_code` (HTTP status, e.g. 200, 301, 403). No need for `eval window.location.href` — goto tells you where you landed.
 - `back` / `forward` — browser history. Step NDJSON includes `url` (page URL after navigation).
@@ -120,10 +123,9 @@ passe run tests/checkout-flow.passe
 - `hover <selector>` — mouseover event
 
 **Observation:**
-- `screenshot [--fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. `--fast` = JPEG q70 + optimizeForSpeed + viewport-only (2-4x faster, 3-6x smaller). Returns timing `breakdown` in step NDJSON.
+- `screenshot [--fast] [--no-fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. `--fast` = JPEG q70 + optimizeForSpeed + viewport-only (2-4x faster, 3-6x smaller). `PASSE_SCREENSHOT_FAST` env var defaults to `--fast`; `--no-fast` overrides it. Returns timing `breakdown` in step NDJSON.
 - `snapshot [path]` — list interactive elements with CSS selectors. For element discovery.
 - `read [--source extractor] [--no-wait] [path]` — extract page content as markdown. **Content-type sniffing**: if the page's MIME type is structured data (application/json, text/xml, text/plain, text/csv, etc.), bypasses extraction and returns raw content (JSON is pretty-printed). Reports `source: raw` and `content_type` in step output. For HTML pages, uses the extraction cascade: trafilatura (Python-side) → Readability.js+Turndown (browser-side) → innerText. Use `--source trafilatura`, `--source readability`, `--source innertext`, or `--source raw` to force a specific extractor. Logs `source` in step output. **Auto-waits for DOM stability** when the previous verb was a navigation (`goto`, `back`, `forward`) — no explicit `wait` needed. Use `--no-wait` to skip auto-wait.
-- `fetch <url> [--source extractor] [path]` — compound verb: `goto` + auto-wait + `read` in one step. The default for research/extraction workflows. Path optional — if omitted, writes to a temp file and reports the path in step output. Passes through `--source` flag to the read cascade.
 - `eval <expression>` — run JS, result to stdout
 - `eval-to <path> <expression>` — run JS, write result to file (for large data)
 - `eval-file <js-path>` — read JS from a file and evaluate. Use for multi-line JS — avoids minification.
@@ -213,6 +215,8 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 9. **DOM mutation during TreeWalker**: If using `eval` with `createTreeWalker` to walk and mutate the DOM (e.g. `replaceChild`), the walker loses its position and silently stops after 1-2 nodes. Collect nodes into an array first, then mutate in a second pass.
 10. **Multi-line JS in `eval`**: The DSL is line-based — `eval` takes one line. For multi-line JS, use `eval-file <path>` which reads from a file. Don't minify JS to fit on one line.
 11. **`eval-file-to` arg order**: `eval-file-to <out-path> <js-path>` — output first, source second. Consistent with `eval-to <path> <expression>` but opposite to Unix `cp src dest` convention.
+12. **CLI stderr hints**: Passe emits helpful hints on stderr — inline script complexity warnings (>4 verbs, >200 chars), `goto`+`read` → `fetch` suggestions, "did you mean?" for wrong verb names, about:blank tab warnings, and bare Chrome profile warnings. These are informational. Read and act on them.
+13. **Human-readable summary line**: After every run, stderr shows a one-liner like `[passe] 3 steps, 342ms, /tmp/out.png (234KB)`. This is for quick sanity checks — the structured JSON in stdout is still the primary output.
 
 ## Atomic commands
 
@@ -221,9 +225,16 @@ For one-off operations without the script runner:
 ```bash
 passe screenshot /tmp/current-page.png    # Screenshot whatever's loaded
 passe eval "document.title"                # Quick JS eval
+passe fetch https://example.com            # Fetch + extract content (creates own tab)
+passe fetch https://example.com /tmp/out.md  # Fetch to explicit path
 ```
 
-These operate on the current page state — no navigation. Useful for quick checks.
+`passe screenshot` and `passe eval` operate on the current page state — no navigation. `passe fetch` creates its own tab (like `passe run`), navigates, extracts, and closes it. Short content (<2000 words) is inlined in the stdout JSON — no file round-trip needed.
+
+### Environment variables
+
+- `PASSE_CDP` — CDP endpoint URL (default `http://localhost:9222`)
+- `PASSE_SCREENSHOT_FAST` — set to any value to default all screenshots to `--fast` (JPEG q70, viewport-only). Override per-screenshot with `--no-fast` when full-page PNG fidelity is needed.
 
 ## Development
 
