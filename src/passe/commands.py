@@ -1,6 +1,7 @@
 """CLI subcommands — run, screenshot, eval, devices."""
 
 import json
+import os
 import sys
 
 from passe.connection import connect
@@ -243,9 +244,12 @@ async def _warn_if_blank_page(client):
 
 async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
     """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
+    no_fast = '--no-fast' in args
     fast = '--fast' in args
+    if not fast and not no_fast:
+        fast = bool(os.environ.get('PASSE_SCREENSHOT_FAST', ''))
     viewport_only = '--viewport' in args
-    args = [a for a in args if a not in ('--fast', '--viewport')]
+    args = [a for a in args if a not in ('--fast', '--viewport', '--no-fast')]
     fmt = 'png'
     quality = None
     optimize = False

@@ -78,9 +78,14 @@ Run flags:
 
 Screenshot flags:
   --fast            JPEG q70, viewport-only, optimizeForSpeed
+  --no-fast         Override PASSE_SCREENSHOT_FAST env var
   --viewport        Viewport only (default is full-page)
   --format <fmt>    png, jpeg, or webp (default: png)
   --quality <n>     0-100, for jpeg/webp
+
+Environment:
+  PASSE_CDP               CDP endpoint (default http://localhost:9222)
+  PASSE_SCREENSHOT_FAST   Default to --fast for all screenshots
 
 Use 'passe run --help' for the verb reference.
 """

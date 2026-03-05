@@ -133,8 +133,12 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 ss_args = list(args)
                 # Parse screenshot flags
                 viewport_only = '--viewport' in ss_args
+                no_fast = '--no-fast' in ss_args
                 fast = '--fast' in ss_args
-                ss_args = [a for a in ss_args if a not in ('--viewport', '--fast')]
+                if not fast and not no_fast:
+                    fast = bool(os.environ.get('PASSE_SCREENSHOT_FAST', ''))
+                ss_args = [a for a in ss_args
+                           if a not in ('--viewport', '--fast', '--no-fast')]
                 ss_fmt = 'png'
                 ss_quality = None
                 ss_optimize = False
