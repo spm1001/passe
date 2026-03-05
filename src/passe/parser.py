@@ -52,6 +52,60 @@ VERB_SUGGESTIONS = {
 SCROLL_DIRECTIONS = {'up', 'down', 'left', 'right'}
 
 
+# Minimum argument counts per verb, derived from run_script dispatch.
+# Verbs not listed here accept 0 args.
+VERB_MIN_ARGS = {
+    'goto': 1, 'click': 1, 'click-text': 1, 'click-if': 1,
+    'fill': 2, 'type': 2, 'select': 2,
+    'press': 1, 'hover': 1, 'tap': 1, 'swipe': 2,
+    'scroll': 2, 'viewport': 2,
+    'device': 1, 'fetch': 1,
+    'wait': 1, 'wait-for': 1,
+    'eval': 1, 'eval-to': 2, 'eval-file': 1, 'eval-file-to': 2,
+    'assert': 1, 'log': 1, 'capture': 1,
+}
+
+
+def validate_steps(steps: list[tuple[str, list[str]]]) -> list[dict]:
+    """Validate parsed steps without executing. Returns list of error dicts.
+
+    Each error: {'line': int, 'verb': str, 'error': str}
+    Line numbers are 1-based step indices.
+    """
+    import os
+    errors = []
+    for i, (verb, args) in enumerate(steps):
+        line = i + 1
+        if verb not in KNOWN_VERBS:
+            if verb in VERB_SUGGESTIONS:
+                correct, hint = VERB_SUGGESTIONS[verb]
+                msg = f'Unknown verb "{verb}" — did you mean "{correct}"?'
+                if hint:
+                    msg += f' ({hint})'
+            else:
+                msg = f'Unknown verb: {verb}'
+            errors.append({'line': line, 'verb': verb, 'error': msg})
+            continue
+
+        min_args = VERB_MIN_ARGS.get(verb, 0)
+        if len(args) < min_args:
+            errors.append({
+                'line': line, 'verb': verb,
+                'error': f'{verb} requires at least {min_args} argument(s), got {len(args)}',
+            })
+
+        # File existence checks for eval-file variants
+        if verb in ('eval-file', 'eval-file-to') and args:
+            js_path = args[1] if verb == 'eval-file-to' and len(args) > 1 else args[0]
+            if not os.path.isfile(js_path):
+                errors.append({
+                    'line': line, 'verb': verb,
+                    'error': f'File not found: {js_path}',
+                })
+
+    return errors
+
+
 def resolve_fetch_output(markdown: str, explicit_path: str | None):
     """Decide whether fetch content should be inlined or written to a file.
 

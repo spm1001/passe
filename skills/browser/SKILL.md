@@ -371,7 +371,18 @@ passe screenshot /tmp/current.png
 passe eval "document.title"
 ```
 
-All subcommands create+destroy their own tab and emit the same NDJSON+JSON output protocol as `passe run`.
+```bash
+# Validate a script without executing (no Chrome needed)
+passe explain -c 'goto https://example.com; screenshot /tmp/out.png'
+passe explain script.passe
+passe explain - <<'EOF'
+...
+EOF
+```
+
+`explain` checks verb names, argument counts, file existence (for eval-file), and emits warnings (goto+read → use fetch, complex inline scripts, capture not first). Exit 0 if valid, exit 1 with errors and line numbers. No Chrome connection needed.
+
+All tab-creating subcommands create+destroy their own tab and emit the same NDJSON+JSON output protocol as `passe run`.
 
 ## Mobile UI development loop
 
