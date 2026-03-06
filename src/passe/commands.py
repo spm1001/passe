@@ -134,6 +134,7 @@ _FLASH_JS = """(function() {
 async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
                   keep_on_fail: bool = True, flash: int = None,
+                  foreground: bool = False,
                   device: str = None, dpr: float = None):
     """Run a passe script from file, stdin, or inline."""
     # --reuse-tab implies --keep-tab (don't close someone else's tab)
@@ -171,7 +172,7 @@ async def cmd_run(source: str, inline: str = None,
                     break
             await client.attach_to_visible_page(origin=reuse_origin)
         else:
-            await client.create_tab()
+            await client.create_tab(foreground=foreground)
         await client.send('Page.enable')
         # Apply device preset before script if --device flag used
         if device:
