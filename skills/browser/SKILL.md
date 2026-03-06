@@ -31,7 +31,7 @@ Single Bash call, single WebSocket, arbitrary action sequences. 100x faster than
 | Extract Google Workspace content (Drive, Gmail) | `mise fetch` |
 | Full test suites with fixtures | Playwright directly |
 
-**Passe owns web, mise owns Workspace — no overlap.** `passe read` uses trafilatura (Python-side) as the primary extractor for any page type, falling back to Readability.js+Turndown (browser-side) if trafilatura returns too little. Shadow DOM content is flattened before extraction.
+**Passe owns web, mise owns Workspace — no overlap.** `passe read` uses trafilatura (Python-side) as the primary extractor for any page type, falling back to Readability.js+Turndown (browser-side) if trafilatura returns too little. Shadow DOM content is flattened before extraction. **Apple Developer Documentation** is auto-detected and fetched from the structured JSON endpoint (`source: apple-json`) — no need to use the JSON URL manually.
 
 ## When not to use
 
@@ -125,7 +125,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [--fast] [--no-fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. **`PASSE_SCREENSHOT_FAST` env var** defaults all screenshots to `--fast`; override with `--no-fast` when you need full-page PNG fidelity. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
+- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). **Apple docs** (`developer.apple.com/documentation/*`) auto-detected → structured JSON endpoint (`source: apple-json`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
