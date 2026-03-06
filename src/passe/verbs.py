@@ -588,6 +588,69 @@ RAW_CONTENT_TYPES = frozenset({
 })
 
 
+def _render_apple_json(data: dict) -> str:
+    """Render Apple Developer Documentation JSON into markdown."""
+    meta = data.get('metadata', {})
+    refs = data.get('references', {})
+
+    def inline(parts):
+        out = []
+        for p in (parts or []):
+            t = p.get('type', '')
+            if t == 'text':
+                out.append(p.get('text', ''))
+            elif t == 'codeVoice':
+                out.append(f"`{p.get('code', '')}`")
+            elif t == 'reference':
+                ref = refs.get(p.get('identifier', ''), {})
+                out.append(f"**{ref.get('title', '')}**")
+        return ''.join(out)
+
+    lines = [f"# {meta.get('title', 'Unknown')}",
+             f"*{meta.get('roleHeading', '')}*\n"]
+    abstract = inline(data.get('abstract', []))
+    if abstract:
+        lines.append(f"{abstract}\n")
+    platforms = meta.get('platforms', [])
+    if platforms:
+        lines.append('**Availability:** '
+                      + ' | '.join(f"{p['name']} {p.get('introducedAt', '')}"
+                                   for p in platforms) + '\n')
+    for section in data.get('primaryContentSections', []):
+        kind = section.get('kind', '')
+        if kind == 'declarations':
+            for decl in section.get('declarations', []):
+                tokens = ''.join(t.get('text', '') for t in decl.get('tokens', []))
+                lines.append(f"```swift\n{tokens}\n```\n")
+        elif kind == 'content':
+            for item in section.get('content', []):
+                itype = item.get('type', '')
+                if itype == 'heading':
+                    lines.append(f"{'#' * item.get('level', 2)} {item.get('text', '')}\n")
+                elif itype == 'paragraph':
+                    lines.append(f"{inline(item.get('inlineContent', []))}\n")
+                elif itype == 'codeListing':
+                    lang = item.get('syntax', '')
+                    code = '\n'.join(item.get('code', []))
+                    lines.append(f"```{lang}\n{code}\n```\n")
+                elif itype == 'unorderedList':
+                    for li in item.get('items', []):
+                        for content in li.get('content', []):
+                            if content.get('type') == 'paragraph':
+                                lines.append(f"- {inline(content.get('inlineContent', []))}")
+                    lines.append('')
+    for section in data.get('topicSections', []):
+        lines.append(f"## {section.get('title', '')}\n")
+        for ident in section.get('identifiers', []):
+            ref = refs.get(ident, {})
+            title = ref.get('title', ident.split('/')[-1])
+            desc = inline(ref.get('abstract', []))
+            if ref.get('deprecated'):
+                title = f"~~{title}~~"
+            lines.append(f"- **{title}**" + (f" — {desc}" if desc else ""))
+    return '\n'.join(lines)
+
+
 async def do_read(client: CDPClient, path: str = None, force_source: str = None) -> dict:
     """Extract page content as markdown.
 
@@ -613,6 +676,36 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             with open(path, 'w') as f:
                 f.write(raw_text)
         return {'markdown': raw_text, 'source': 'raw', 'content_type': mime}
+
+    # Apple Developer Documentation: use structured JSON endpoint instead of
+    # extracting from the JS-rendered HTML (which times out trafilatura and
+    # produces nav-chrome soup from innerText).
+    if force_source is None or force_source == 'apple':
+        current_url = await do_eval(client, 'window.location.href')
+        import re as _re
+        apple_match = _re.match(
+            r'https://developer\.apple\.com/documentation/(.+?)(?:\?|#|$)',
+            current_url or ''
+        )
+        if apple_match:
+            doc_path = apple_match.group(1).rstrip('/')
+            json_url = f'https://developer.apple.com/tutorials/data/documentation/{doc_path}.json'
+            try:
+                import urllib.request
+                with urllib.request.urlopen(json_url, timeout=10) as resp:
+                    apple_data = json.loads(resp.read())
+                md = _render_apple_json(apple_data)
+                print(f'[read] Apple docs JSON: {json_url}', file=sys.stderr)
+                print(f'[read] source: apple-json', file=sys.stderr)
+                if path:
+                    with open(path, 'w') as f:
+                        f.write(md)
+                return {'markdown': md, 'source': 'apple-json',
+                        'title': apple_data.get('metadata', {}).get('title', '')}
+            except Exception as exc:
+                if force_source == 'apple':
+                    print(f'[read] Apple JSON failed: {exc}', file=sys.stderr)
+                # Fall through to normal cascade
 
     # Get page HTML (with shadow DOM flattened) and metadata from Chrome.
     from ._libs import SHADOW_FLATTEN_JS

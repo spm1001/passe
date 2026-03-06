@@ -18,18 +18,22 @@ import pytest
 from passe.cli import do_read
 
 
-def _make_client(*values, content_type='text/html'):
+def _make_client(*values, content_type='text/html', url='https://example.com'):
     """Mock CDPClient where each send() returns a different value string.
 
     do_read calls client.send (via do_eval) for:
       1. document.contentType (content-type sniffing)
-      2. outerHTML (shadow DOM flattened)
-      3. metadata JSON (textLength + url)
-      4+ optionally Readability fallback, DOM structure eval, etc.
+      2. window.location.href (Apple docs detection)
+      3. outerHTML (shadow DOM flattened)
+      4. metadata JSON (textLength + url)
+      5+ optionally Readability fallback, DOM structure eval, etc.
     Each call returns the next value from the sequence.
-    The content_type parameter is prepended automatically.
+    The content_type and url parameters are prepended automatically.
     """
-    all_values = (content_type, *values)
+    all_values = [content_type]
+    if url is not None:
+        all_values.append(url)
+    all_values.extend(values)
     client = AsyncMock()
     client.send = AsyncMock(side_effect=[
         {'result': {'result': {'value': v}}} for v in all_values
@@ -531,8 +535,8 @@ async def test_quality_gate_no_dom_eval_when_output_rich():
         result = await do_read(client)
 
     assert result['source'] == 'trafilatura'
-    # Only 2 calls: outerHTML + meta. No DOM signal eval.
-    assert client.send.call_count == 3  # content-type + outerHTML + meta
+    # Only 4 calls: content-type + url + outerHTML + meta. No DOM signal eval.
+    assert client.send.call_count == 4  # content-type + url + outerHTML + meta
 
 
 @pytest.mark.asyncio
@@ -633,6 +637,7 @@ async def test_force_source_trafilatura():
     client = _make_client(
         '<html><body>hello</body></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+        url=None,
     )
     mock_traf = _traf_module(return_value='# Forced trafilatura')
     with patch.dict(sys.modules, {'trafilatura': mock_traf}):
@@ -655,6 +660,7 @@ async def test_force_source_readability():
         '<html><body>hello</body></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com'}),
         readability_data,
+        url=None,
     )
     result = await do_read(client, force_source='readability')
 
@@ -669,6 +675,7 @@ async def test_force_source_innertext():
         '<html><body>hello</body></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com'}),
         'Raw text content here',
+        url=None,
     )
     result = await do_read(client, force_source='innertext')
 
@@ -683,6 +690,7 @@ async def test_force_source_trafilatura_thin_read(capsys):
         '<html><body><div>' + 'x' * 5000 + '</div></body></html>',
         json.dumps({'textLength': 500, 'htmlLength': 10000,
                     'title': 'Developer Reference', 'url': 'http://example.com'}),
+        url=None,
     )
     mock_traf = _traf_module(return_value='tiny')
     with patch.dict(sys.modules, {'trafilatura': mock_traf}):
@@ -710,6 +718,7 @@ async def test_force_source_readability_includes_title():
         json.dumps({'textLength': 600, 'htmlLength': 2000,
                     'title': 'Test Page', 'url': 'http://example.com'}),
         readability_data,
+        url=None,
     )
     result = await do_read(client, force_source='readability')
 
@@ -723,6 +732,7 @@ async def test_force_source_unknown(capsys):
     client = _make_client(
         '<html><body>hello</body></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com'}),
+        url=None,
     )
     result = await do_read(client, force_source='bogus')
 
@@ -848,6 +858,7 @@ async def test_force_source_trafilatura_overrides_json():
         '<html><body>{"data": true}</body></html>',
         json.dumps({'textLength': 100, 'url': 'http://example.com/api'}),
         content_type='application/json',
+        url=None,
     )
     mock_traf = _traf_module(return_value='extracted content')
     with patch.dict(sys.modules, {'trafilatura': mock_traf}):
@@ -884,14 +895,18 @@ async def test_invalid_json_returned_as_is():
 # ── Thin-read diagnostics ────────────────────────────────
 
 
-def _make_thin_client(html, meta_dict, *extra_values, content_type='text/html'):
+def _make_thin_client(html, meta_dict, *extra_values, content_type='text/html',
+                      url='https://example.com'):
     """Mock client for thin-read tests.
 
-    Provides content_type, outerHTML, meta JSON, then any extra values
-    (e.g. Readability fallback response).
+    Provides content_type, url (Apple docs check), outerHTML, meta JSON,
+    then any extra values (e.g. Readability fallback response).
     """
     meta_json = json.dumps(meta_dict)
-    all_values = (content_type, html, meta_json, *extra_values)
+    all_values = [content_type]
+    if url is not None:
+        all_values.append(url)
+    all_values.extend([html, meta_json, *extra_values])
     client = AsyncMock()
     client.send = AsyncMock(side_effect=[
         {'result': {'result': {'value': v}}} for v in all_values
