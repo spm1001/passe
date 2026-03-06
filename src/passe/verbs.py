@@ -724,8 +724,24 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
         output_table_rows = len(re.findall(r'^\|.*\w.*\|', markdown, re.MULTILINE))
         output_code_blocks = len(re.findall(r'^```', markdown, re.MULTILINE)) // 2
 
+        # Pipe noise check: bare "|" lines from presentation-table artifacts
+        # (HTML email templates use tables for layout, not data — trafilatura
+        # leaks cell boundaries as stray pipe characters on empty lines)
+        lines = markdown.split('\n')
+        non_empty = [l for l in lines if l.strip()]
+        bare_pipes = sum(1 for l in non_empty if l.strip() == '|')
+        if len(non_empty) > 10 and bare_pipes / len(non_empty) > 0.15:
+            print(
+                f'[read] quality gate: trafilatura has {bare_pipes} bare pipe lines'
+                f' ({bare_pipes*100//len(non_empty)}% of content)'
+                ' — falling to Readability', file=sys.stderr
+            )
+            gate_rejected_markdown = markdown
+            markdown = None
+            source = None
+
         # Only query DOM when output might be missing structure
-        if output_table_rows < 20 or output_code_blocks < 5:
+        if source == 'trafilatura' and (output_table_rows < 20 or output_code_blocks < 5):
             dom_raw = await do_eval(client, (
                 'JSON.stringify({dataRows:[...document.querySelectorAll("tr")]'
                 '.filter(r=>r.querySelectorAll("td").length>=2).length,'
