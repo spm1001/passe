@@ -229,10 +229,15 @@ class CDPClient:
         self._owns_tab = False
         return self.session_id
 
-    async def create_tab(self) -> str:
-        """Create a fresh tab and attach to it. Caller owns the tab lifecycle."""
+    async def create_tab(self, foreground: bool = False) -> str:
+        """Create a fresh tab and attach to it. Caller owns the tab lifecycle.
+
+        foreground=True creates a visible tab (background: False) and calls
+        Page.bringToFront. Required for sites using Google Closure jsaction
+        handlers, which silently ignore events on background tabs.
+        """
         created = await self.send('Target.createTarget', {
-            'url': 'about:blank', 'background': True,
+            'url': 'about:blank', 'background': not foreground,
         })
         self._target_id = created['result']['targetId']
         result = await self.send('Target.attachToTarget', {
@@ -241,6 +246,8 @@ class CDPClient:
         })
         self.session_id = result['result']['sessionId']
         self._owns_tab = True
+        if foreground:
+            await self.send('Page.bringToFront')
         return self.session_id
 
     async def close_tab(self):

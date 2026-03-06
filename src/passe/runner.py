@@ -328,6 +328,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 await do_assert(client, args[0])
             elif verb == 'log':
                 print(f'[log] {args[0]}', file=sys.stderr)
+            elif verb == 'bring-to-front':
+                await client.send('Page.bringToFront')
             elif verb == 'capture':
                 if i > 0:
                     print('[capture] Warning: capture is not the first verb — '

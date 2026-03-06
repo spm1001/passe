@@ -12,7 +12,7 @@ KNOWN_VERBS = {
     'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
     'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle', 'wait-navigation',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
-    'assert', 'log',
+    'assert', 'log', 'bring-to-front',
 }
 
 # Verbs that trigger auto-wait in the next read/fetch step.
