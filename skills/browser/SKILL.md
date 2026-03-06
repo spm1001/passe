@@ -98,6 +98,7 @@ passe run tests/checkout.passe
 passe --cdp http://host:9222 run -c '...'              # Target specific Chrome
 passe --device "iPhone 14 Pro" run -c '...'             # Device emulation preset
 passe --device "iPhone 14 Pro" --dpr 1 run -c '...'     # 1x DPR (smaller screenshots)
+passe run --foreground -c '...'                         # Tab starts visible (jsaction sites, OAuth)
 ```
 
 Never generate long inline one-liners. Use heredoc for 5+ verbs.
@@ -136,6 +137,9 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Emulation:**
 - `device <"name"> [--dpr N]` — apply device emulation preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` overrides DPR for smaller screenshots.
 - `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
+
+**Visibility:**
+- `bring-to-front` — make the tab visible and focused. Required for `jsaction` sites (Google Groups) that only bind handlers to visible elements.
 
 **Control:**
 - `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-idle [timeout_ms]` (network settles — replaces guessed waits), `wait-navigation`
