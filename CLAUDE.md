@@ -101,6 +101,7 @@ passe run tests/checkout-flow.passe
 - `--cdp <url>` — CDP endpoint (overrides `PASSE_CDP` env, default `http://localhost:9222`)
 - `--device <name>` — device emulation preset applied before script
 - `--dpr <n>` — override device pixel ratio (e.g. `1` for smaller screenshots)
+- `--foreground` — create tab in foreground (visible to human). Needed for `jsaction` sites (Google Groups) and OAuth flows where the page must be visible for event handlers to bind.
 
 ### Verb reference
 
@@ -137,6 +138,9 @@ passe run tests/checkout-flow.passe
 **Emulation:**
 - `device <"name"> [--dpr N]` — apply device preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` for smaller screenshots.
 - `viewport <width> <height>` — raw dimensions escape hatch (no UA/touch/safe-area)
+
+**Visibility:**
+- `bring-to-front` — make the tab visible and focused (`Page.bringToFront`). Required for sites that use `jsaction` (e.g. Google Groups) which only bind click handlers to visible elements.
 
 **Control:**
 - `wait <ms>` — sleep

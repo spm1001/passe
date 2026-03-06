@@ -46,14 +46,13 @@ _RE_MULTILINE_SIG = re.compile(
 
 # Sign-off + bare name at end of message
 _RE_SIGNOFF_NAME = re.compile(
-    r'\n\s*'
+    r'\n[^\S\n]*'
     r'(?:Ngā mihi (?:nui|maioha)|Kind regards|Warm regards|Many thanks|'
     r'With thanks|All the best|Best wishes|Best|Thanks!?|Cheers)'
-    r'[,!]?\s*'
-    r'(?:\s*\n)*'
-    r'(?:\s*[A-Z][a-z]+\s*)?'
-    r'\s*$',
-    re.DOTALL
+    r'[,!]?[^\S\n]*'
+    r'(?:[^\S\n]*\n)*'
+    r'(?:[^\S\n]*[A-Z][a-z]+[^\S\n]*)?'
+    r'[^\S\n]*$',
 )
 
 # Attachment filename lines
