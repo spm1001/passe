@@ -709,6 +709,7 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
         print(f'[read] trafilatura failed: {exc} — falling back to Readability', file=sys.stderr)
 
     gate_rejected_markdown = None  # stash if gate rejects — better than innerText
+    gate_missing_code = False  # track if rejection was for code blocks
 
     # Stage 1.5: Structural quality gate — detect table/code-block loss.
     # Trafilatura can pass the 10% text ratio check but strip critical structure.
@@ -761,9 +762,11 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             # Binary check: page has code blocks, output has none
             if output_code_blocks == 0 and page_code >= 2:
                 lost.append(f'{page_code} code blocks')
+                gate_missing_code = True
             # Proportional check: many code blocks mostly stripped
             elif page_code >= 5 and output_code_blocks < page_code * 0.25:
                 lost.append(f'{page_code} code blocks (got {output_code_blocks})')
+                gate_missing_code = True
 
             if lost:
                 print(
@@ -791,6 +794,22 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
                 markdown = gate_rejected_markdown
                 source = 'trafilatura'
                 warning = 'Readability also failed — kept trafilatura output (missing some structure)'
+                # Supplement with DOM code blocks if that's what was lost
+                if gate_missing_code:
+                    code_raw = await do_eval(client, (
+                        'JSON.stringify([...document.querySelectorAll("pre")]'
+                        '.filter(e=>e.textContent.length>30)'
+                        '.map(e=>e.textContent.trim()))'
+                    ))
+                    code_blocks = json.loads(code_raw)
+                    if code_blocks:
+                        markdown += '\n\n---\n\n## Code Examples\n\n'
+                        for block in code_blocks:
+                            markdown += '```\n' + block + '\n```\n\n'
+                        warning = (f'Readability also failed — supplemented trafilatura prose'
+                                   f' with {len(code_blocks)} code blocks from DOM')
+                        print(f'[read] supplemented with {len(code_blocks)} code blocks from DOM',
+                              file=sys.stderr)
             else:
                 markdown = md
                 source = 'innerText'
