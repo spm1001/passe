@@ -35,12 +35,12 @@ _RE_CORP_SIG = re.compile(
 
 # Multi-line sig block: blank line -> name -> title -> rest
 _RE_MULTILINE_SIG = re.compile(
-    r'\n\s*\n'
-    r'\s*[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2}\s*\n'
-    r'(?:\s*\n)*'
-    r'\s*(?:Marketing|Senior|Head\s+of|Director|Manager|Lead|VP|Chief|'
-    r'General\s+Counsel|Legal\s+Advisor|Associate|Analyst|Executive)[^\n]*\n'
-    r'(?:[^\n]*\n)*$',
+    r'\n[^\S\n]*\n'
+    r'[^\S\n]*[A-Z][a-z]+(?:[ \t]+[A-Z][a-z]+){0,2}[^\S\n]*\n'
+    r'(?:[^\S\n]*\n){0,5}'
+    r'[^\S\n]*(?:Marketing|Senior|Head[ \t]+of|Director|Manager|Lead|VP|Chief|'
+    r'General[ \t]+Counsel|Legal[ \t]+Advisor|Associate|Analyst|Executive)[^\n]*\n'
+    r'(?:[^\n]*\n){0,30}$',
     re.MULTILINE
 )
 
