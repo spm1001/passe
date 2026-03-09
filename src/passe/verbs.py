@@ -534,11 +534,10 @@ async def do_snapshot(client: CDPClient, path: str = None,
 
 
 THIN_READ_THRESHOLD = 200  # chars — below this, emit diagnostic
-AUTH_PATTERNS = ('sign in', 'log in', 'login', 'access denied', 'forbidden', '403', 'unauthorized', '401')
-
+AUTH_PATTERNS = ('sign in', 'log in', 'login', 'access denied', 'forbidden', '403', 'unauthorized', '401', 'page not found', '404')
 
 def _check_thin_read(markdown: str, html: str, page_text_length: int,
-                     page_html_length: int, page_title: str) -> dict | None:
+                     page_html_length: int, page_title: str, status_code: int | None = None) -> dict | None:
     """Check for suspiciously small extraction. Returns thin_read dict or None.
 
     Shared between forced-source and cascade paths so both emit diagnostics.
@@ -553,7 +552,20 @@ def _check_thin_read(markdown: str, html: str, page_text_length: int,
 
     word_count = len(markdown.split())
     html_lower = html.lower() if html else ''
-    if any(p in html_lower for p in AUTH_PATTERNS) and 'type="password"' in html_lower:
+    title_lower = page_title.lower() if page_title else ''
+
+    # 1. Check HTTP Status Codes first
+    if status_code == 404:
+        cause = 'not_found'
+    elif status_code in (401, 403):
+        cause = 'auth_wall'
+    # 2. Check the Title tag for strong semantic hints
+    elif any(p in title_lower for p in ('sign in', 'log in', 'login', 'access denied')):
+        cause = 'auth_wall'
+    elif any(p in title_lower for p in ('not found', '404')):
+        cause = 'not_found'
+    # 3. Fallback to structural/body hints
+    elif 'type="password"' in html_lower or '<form' in html_lower and 'login' in html_lower:
         cause = 'auth_wall'
     elif page_text_length < 100:
         cause = 'empty_page'
@@ -726,6 +738,15 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
     source = None
     warning = None
 
+    # Find status code from network events (to help thin-read diagnostics)
+    status_code = None
+    for req in client._network_requests.values():
+        if (req.get('resource_type') == 'Document'
+                and req.get('url') == page_url
+                and req.get('status') is not None):
+            status_code = req['status']
+            break
+
     # Forced source — skip cascade, use only the specified extractor
     if force_source:
         fs = force_source.lower()
@@ -764,7 +785,7 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
 
         # Thin-read diagnostics (shared with cascade path)
         thin_read = _check_thin_read(markdown, html, page_text_length,
-                                     page_html_length, page_title)
+                                     page_html_length, page_title, status_code)
         if thin_read and not warning:
             word_count = thin_read['word_count']
             cause = thin_read['possible_cause']
@@ -924,7 +945,7 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
 
     # Thin-read diagnostics (shared helper — also used by forced-source path above)
     thin_read = _check_thin_read(markdown, html, page_text_length,
-                                 page_html_length, page_title)
+                                 page_html_length, page_title, status_code)
     if thin_read and not warning:
         word_count = thin_read['word_count']
         cause = thin_read['possible_cause']
