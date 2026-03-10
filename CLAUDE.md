@@ -84,7 +84,7 @@ passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 passe run - <<'EOF'
 goto https://example.com
 click-text "Accept Cookies"
-wait 500
+wait 0.5
 type "#search" "query"
 press Enter
 wait-for .results
@@ -143,9 +143,9 @@ passe run tests/checkout-flow.passe
 - `bring-to-front` — make the tab visible and focused (`Page.bringToFront`). Required for sites that use `jsaction` (e.g. Google Groups) which only bind click handlers to visible elements.
 
 **Control:**
-- `wait <ms>` — sleep
-- `wait-for <selector> [timeout_ms]` — wait until selector matches visible element. Default 10s. **Critical for SPAs.**
-- `wait-idle [timeout_ms]` — wait until network requests settle (in-flight count at zero for 500ms). Default 30s timeout. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use `wait-idle` instead of guessed `wait` delays. Step NDJSON: `settled_after_ms`, `timed_out`. **Caveat:** sites with analytics beacons, websockets, or long-polling may never settle — use a short timeout (e.g. `wait-idle 5000`) or prefer `wait-for <selector>` when you know what content to expect.
+- `wait <seconds>` — sleep. Decimal for sub-second: `wait 3` = 3s, `wait 0.5` = 500ms.
+- `wait-for <selector> [seconds]` — wait until selector matches visible element. Default 10. **Critical for SPAs.**
+- `wait-idle [seconds]` — wait until network requests settle (in-flight count at zero for 500ms). Default 30. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use `wait-idle` instead of guessed `wait` delays. Step NDJSON: `settled_after_ms`, `timed_out`. **Caveat:** sites with analytics beacons, websockets, or long-polling may never settle — use a short timeout (e.g. `wait-idle 5`) or prefer `wait-for <selector>` when you know what content to expect.
 - `wait-navigation` — wait for page load event
 - `watch [--fast] [--cooldown <ms>] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Three debounce layers: JS MutationObserver (150ms clusters rapid DOM changes), Python drain (100ms batches queued events), cooldown (default 1000ms, min interval between captures). Leading + trailing edge: captures immediately on first change, then once more after cooldown to get the final state. Runs until killed. Use with `Bash run_in_background`.
 - `assert <expression>` — eval JS, fail script if falsy. Error shows actual value.
@@ -198,7 +198,7 @@ Passe runs inside Chrome's authenticated session. For SPAs where `type`/`press E
 ```bash
 passe run - <<'EOF'
 goto https://intranet.example.com/search
-wait 1000
+wait 1
 eval-to /tmp/results.json (async () => { const token = document.querySelector('input[name="csrf"]').value; const resp = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token }, body: JSON.stringify({ query: 'parental leave' }) }); return JSON.stringify(await resp.json()); })()
 EOF
 ```
@@ -210,7 +210,7 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
 2. **`type` on React controlled inputs**: `type` now auto-detects when CDP key events don't take (React controlled components). After typing, it checks the element's value — if it doesn't match, it automatically falls back to: re-focus the element, `nativeInputValueSetter`, `dispatchEvent('input')`, `dispatchEvent('change')`, then a 100ms delay for React to reconcile before the next verb runs. You'll see `[type] React controlled input detected` on stderr when this happens. `press Enter` after `type` works correctly — the reconciliation delay ensures React has processed the input event before the keypress fires. No manual workaround needed.
 3. **`read` extraction cascade**: **Content-type sniffing runs first** — if `document.contentType` is structured data (JSON, XML, CSV, plain text, YAML), the extraction cascade is bypassed entirely and raw content is returned (JSON is pretty-printed). **Apple Developer Documentation** (`developer.apple.com/documentation/*`) is auto-detected and fetched from the structured JSON endpoint — produces clean markdown with declarations, code examples, and topic sections (the HTML page is JS-rendered and times out all extractors). For HTML pages, trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete (including when trafilatura import fails or throws). The `source` field in step output tells you which extractor was used (`raw`, `trafilatura`, `readability`, or `innerText`). Shadow DOM content is now flattened before serialization — web components (e.g. MDN's `<mdn-code-example>`) are inlined into the HTML so both extractors can see them. A structural quality gate detects when trafilatura drops tables or code blocks: it counts pipe-table rows and code fences in the output, compares against DOM signals (table data rows, `<pre>` blocks), and falls through to Readability if significant structure was lost (e.g. ISO country codes page: 294 data rows stripped → Readability preserves them). **Thin-read diagnostics**: when extraction returns <200 chars and the page isn't genuinely small, a `thin_read` diagnostic is emitted in step NDJSON with `word_count`, `extracted_chars`, `page_text_chars`, `html_chars`, `title`, and `possible_cause` (one of `auth_wall`, `empty_page`, `js_hydration`, `unknown`). Warning also on stderr. Suppressed for legitimately small pages (high extraction ratio with ≥100 chars of page text). Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages. Use `read --source readability` or `read --source innertext` to bypass the cascade for debugging. Use `--source raw` to force raw passthrough on any page. Use `eval` with `innerText` as a deliberate escape hatch.
-3a. **Auto-wait and SPA client-side navigation**: `read` auto-waits for DOM stability after `goto`/`back`/`forward` — no explicit `wait` needed. Uses dual-signal polling (element count + text length). But auto-wait does NOT fire after `click` — SPA client-side route changes (React Router, Next.js) happen via click without a page navigation. For these, use `wait-idle` (waits for network to settle) or `wait-for .new-content-selector` between click and read. `wait-idle` is the better default — it replaces guessed `wait 500`/`wait 1000` delays with a deterministic signal. The `fetch` verb always auto-waits (no `--no-wait` option — use `goto; read --no-wait` for granular control).
+3a. **Auto-wait and SPA client-side navigation**: `read` auto-waits for DOM stability after `goto`/`back`/`forward` — no explicit `wait` needed. Uses dual-signal polling (element count + text length). But auto-wait does NOT fire after `click` — SPA client-side route changes (React Router, Next.js) happen via click without a page navigation. For these, use `wait-idle` (waits for network to settle) or `wait-for .new-content-selector` between click and read. `wait-idle` is the better default — it replaces guessed `wait 0.5`/`wait 1` delays with a deterministic signal. The `fetch` verb always auto-waits (no `--no-wait` option — use `goto; read --no-wait` for granular control).
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
 5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
 6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.

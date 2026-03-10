@@ -212,7 +212,7 @@ async def test_run_script_wait_idle_with_timeout_arg(capsys):
         {'result': {'result': {'value': 'http://mock/'}}},  # final_url
     ]
 
-    result = await run_script(client, [('wait-idle', ['200'])])
+    result = await run_script(client, [('wait-idle', ['0.2'])])
     assert result['ok'] is True
 
     stderr = capsys.readouterr().err
