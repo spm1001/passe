@@ -205,6 +205,7 @@ async def do_type(client: CDPClient, selector: str, text: str):
     if actual != text:
         fallback_js = f'''(() => {{
             const el = document.querySelector({json.dumps(selector)});
+            el.focus();
             const proto = el.tagName === 'TEXTAREA'
                 ? window.HTMLTextAreaElement.prototype
                 : window.HTMLInputElement.prototype;
