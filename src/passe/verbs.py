@@ -217,6 +217,10 @@ async def do_type(client: CDPClient, selector: str, text: str):
         await client.send('Runtime.evaluate', {
             'expression': fallback_js, 'awaitPromise': False
         })
+        # Give React time to reconcile after the synthetic input/change events.
+        # Without this, the next verb (e.g. press Enter) fires via CDP before
+        # React has updated its internal state from the dispatched events.
+        await asyncio.sleep(0.1)
         print(f'[type] React controlled input detected — used nativeInputValueSetter', file=sys.stderr)
 
 
