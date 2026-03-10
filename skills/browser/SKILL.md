@@ -44,10 +44,10 @@ These are the most frequent errors from real passe usage across ~455 invocations
 | Mistake | Why it's wrong | Do this instead |
 |---------|---------------|-----------------|
 | `passe eval "document.title"` after `passe run` | `run` creates a tab and **closes it on success** (on failure it's kept for 30s). `eval` attaches to the first *existing* tab — which is whatever Sameer has open, not your page. | Put all verbs in one `passe run` script. Use `eval` inside the script, or use `--keep-tab` / `--flash` if you need the tab to survive. |
-| `goto URL; wait 1000; read` | `read` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; read` or just `fetch URL` (one verb). |
+| `goto URL; wait 1; read` | `read` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; read` or just `fetch URL` (one verb). |
 | `goto URL; read /tmp/out.md` instead of `fetch` | The `fetch` verb does goto + auto-wait + read in one step and is the ergonomic default. | `passe run -c 'fetch URL /tmp/out.md'` or `passe fetch URL` (top-level subcommand). |
 | Using passe for Google Drive/Gmail content | Passe opens a browser tab. Workspace content needs API access. | Use `mise fetch` for Drive docs, Gmail, Sheets. |
-| `passe run -c 'goto URL; click sel; type sel text; wait 500; screenshot /tmp/out.png; read /tmp/content.md'` | Monster inline one-liners are unreadable and error-prone. The CLI warns at >4 verbs or >200 chars. | Use heredoc for 5+ verbs. |
+| `passe run -c 'goto URL; click sel; type sel text; wait 0.5; screenshot /tmp/out.png; read /tmp/content.md'` | Monster inline one-liners are unreadable and error-prone. The CLI warns at >4 verbs or >200 chars. | Use heredoc for 5+ verbs. |
 | Chasing "doubled output" from passe | This is a Claude Code Bash tool quirk — non-zero exit codes replay output. Not a passe bug. | Check the exit code. If passe failed, read the error. Don't debug the duplication. |
 | `scroll down 500` | Passe uses `scroll <x> <y>` (pixel coordinates), not natural language directions. | `scroll 0 500` |
 
@@ -84,7 +84,7 @@ passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 passe run - <<'EOF'
 goto https://example.com
 click-text "Accept Cookies"
-wait 500
+wait 0.5
 type "#search" "query"
 press Enter
 wait-for .results
@@ -142,7 +142,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `bring-to-front` — make the tab visible and focused. Required for `jsaction` sites (Google Groups) that only bind handlers to visible elements.
 
 **Control:**
-- `wait <ms>`, `wait-for <selector> [timeout_ms]`, `wait-idle [timeout_ms]` (network settles — replaces guessed waits), `wait-navigation`
+- `wait <seconds>` (decimal ok: `wait 0.5`), `wait-for <selector> [seconds]` (default 10), `wait-idle [seconds]` (default 30, network settles — replaces guessed waits), `wait-navigation`
 - `watch [--fast] [--cooldown <ms>] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Cooldown 1000ms default (prevents screenshot storms). Screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
 - `assert <expression>` — fail script if falsy. Sub-millisecond.
 - `log <message>` — print to stderr
@@ -204,7 +204,7 @@ Read `/tmp/elements.txt` — shows `[0] button "Sign in" css=#sign-in` etc.
 passe run - <<'EOF'
 goto https://site.com
 click "#sign-in"
-wait 500
+wait 0.5
 screenshot /tmp/result.png
 EOF
 ```
@@ -223,7 +223,7 @@ passe run -c 'goto https://site.com; snapshot /tmp/elements.txt'
 passe run - <<'EOF'
 goto https://site.com
 click "div > button:nth-of-type(2)"
-wait 500
+wait 0.5
 read /tmp/content.md
 EOF
 ```
@@ -240,7 +240,7 @@ goto https://spa.example.com
 click-text "Search"
 type "#query" "parental leave"
 press Enter
-wait 2000
+wait 2
 EOF
 ```
 
@@ -279,7 +279,7 @@ The DSL is line-based — `eval` and `eval-to` take a single line of JS. For any
 # Then reference it in the script:
 passe run - <<'EOF'
 goto https://example.com
-wait 1000
+wait 1
 eval-file /tmp/my-analysis.js
 screenshot /tmp/result.png
 EOF
@@ -346,7 +346,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
-- **Arbitrary `wait` durations**: Don't guess (`wait 2000`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use `wait-idle` (waits for network to settle) or `wait-for <selector>` for a specific element. `wait-idle` is the better default — it's deterministic and replaces guessed delays.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use `wait-idle` (waits for network to settle) or `wait-for <selector>` for a specific element. `wait-idle` is the better default — it's deterministic and replaces guessed delays.
 - **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
 ## Subcommands (no DSL needed)
