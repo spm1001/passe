@@ -25,7 +25,7 @@ def test_goto_read_emits_fetch_hint():
 
 
 def test_goto_wait_read_emits_both_hints():
-    steps = [('goto', ['https://example.com']), ('wait', ['1000']),
+    steps = [('goto', ['https://example.com']), ('wait', ['1']),
              ('read', ['/tmp/out.md'])]
     output = _capture_hints(steps)
     assert 'fetch' in output
@@ -33,8 +33,8 @@ def test_goto_wait_read_emits_both_hints():
 
 
 def test_goto_multiple_waits_read_emits_both():
-    steps = [('goto', ['https://example.com']), ('wait', ['500']),
-             ('wait', ['500']), ('read', ['/tmp/out.md'])]
+    steps = [('goto', ['https://example.com']), ('wait', ['0.5']),
+             ('wait', ['0.5']), ('read', ['/tmp/out.md'])]
     output = _capture_hints(steps)
     assert 'fetch' in output
     assert 'auto-waits' in output
@@ -71,7 +71,7 @@ def test_hint_fires_once_for_multiple_goto_read():
 def test_hint_fires_once_for_mixed_patterns():
     steps = [
         ('goto', ['https://a.com']), ('read', ['/tmp/a.md']),
-        ('goto', ['https://b.com']), ('wait', ['500']), ('read', ['/tmp/b.md']),
+        ('goto', ['https://b.com']), ('wait', ['0.5']), ('read', ['/tmp/b.md']),
     ]
     output = _capture_hints(steps)
     assert output.count('fetch') == 1

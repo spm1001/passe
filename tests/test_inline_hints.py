@@ -25,9 +25,9 @@ def test_short_script_no_hint():
 
 
 def test_five_verbs_emits_heredoc_hint():
-    steps = [('goto', ['u']), ('click', ['a']), ('wait', ['500']),
+    steps = [('goto', ['u']), ('click', ['a']), ('wait', ['0.5']),
              ('type', ['b', 'c']), ('screenshot', ['p'])]
-    output = _capture_hints(steps, 'goto u; click a; wait 500; type b c; screenshot p')
+    output = _capture_hints(steps, 'goto u; click a; wait 0.5; type b c; screenshot p')
     assert 'heredoc' in output
     assert 'eval-file' not in output
 
@@ -71,9 +71,9 @@ def test_eval_hint_fires_once():
 
 def test_both_hints_can_fire():
     long_js = 'a' * 121
-    steps = [('goto', ['u']), ('click', ['a']), ('wait', ['500']),
+    steps = [('goto', ['u']), ('click', ['a']), ('wait', ['0.5']),
              ('type', ['b', 'c']), ('eval', [long_js])]
-    inline = f'goto u; click a; wait 500; type b c; eval {long_js}'
+    inline = f'goto u; click a; wait 0.5; type b c; eval {long_js}'
     output = _capture_hints(steps, inline)
     assert 'heredoc' in output
     assert 'eval-file' in output

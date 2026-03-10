@@ -65,7 +65,7 @@ def test_goto_read_warning():
 
 
 def test_goto_wait_read_warning():
-    result, code = _run_explain(inline='goto https://example.com; wait 1000; read /tmp/out.md')
+    result, code = _run_explain(inline='goto https://example.com; wait 1; read /tmp/out.md')
     assert code == 0
     assert any('auto-waits' in w for w in result['warnings'])
 

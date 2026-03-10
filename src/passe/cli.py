@@ -139,9 +139,9 @@ Emulation:
   viewport <w> <h>          Set raw viewport dimensions
 
 Control:
-  wait <ms>                 Sleep
-  wait-for <sel> [timeout]  Wait for selector (default 10s)
-  wait-idle [timeout]       Wait for network to settle (default 30s)
+  wait <seconds>            Sleep (decimal ok: wait 0.5 = 500ms)
+  wait-for <sel> [seconds]  Wait for selector (default 10)
+  wait-idle [seconds]       Wait for network to settle (default 30)
   wait-navigation           Wait for page load event
   watch [flags] <path>      Auto-screenshot on HMR/DOM changes. --fast, --cooldown <ms> (default 1000)
   bring-to-front            Make tab visible (required for jsaction sites like Google Groups)

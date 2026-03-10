@@ -24,6 +24,11 @@ from passe.verbs import (
 )
 
 
+def _secs_to_ms(s: str, default_ms: int) -> int:
+    """Parse a user-facing seconds arg to internal milliseconds."""
+    return int(float(s) * 1000) if s else default_ms
+
+
 # Verbs where a failure should auto-snapshot to show what's on the page.
 # These are interaction verbs that target selectors — if the selector doesn't
 # match, showing available elements saves a round-trip.
@@ -292,17 +297,21 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 # do_watch only returns on cancellation — skip remaining steps
                 break
             elif verb == 'wait':
-                await asyncio.sleep(int(args[0]) / 1000)
+                secs = float(args[0])
+                if secs >= 30:
+                    print(f'[wait] {secs}s is a long wait — did you mean '
+                          f'seconds? (wait 0.5 = 500ms)', file=sys.stderr)
+                await asyncio.sleep(secs)
             elif verb == 'wait-for':
-                timeout = int(args[1]) if len(args) > 1 else 10000
-                await do_wait_for(client, args[0], timeout)
+                timeout_ms = _secs_to_ms(args[1] if len(args) > 1 else '', 10000)
+                await do_wait_for(client, args[0], timeout_ms)
             elif verb == 'wait-idle':
-                timeout = int(args[0]) if args else 30000
-                idle_result = await do_wait_idle(client, timeout_ms=timeout)
+                timeout_ms = _secs_to_ms(args[0] if args else '', 30000)
+                idle_result = await do_wait_idle(client, timeout_ms=timeout_ms)
                 step_info['settled_after_ms'] = idle_result['settled_after_ms']
                 if idle_result['timed_out']:
                     step_info['timed_out'] = True
-                    print(f'[wait-idle] Timed out after {timeout}ms — '
+                    print(f'[wait-idle] Timed out after {timeout_ms / 1000}s — '
                           f'network did not settle', file=sys.stderr)
             elif verb == 'wait-navigation':
                 await do_wait_navigation(client)

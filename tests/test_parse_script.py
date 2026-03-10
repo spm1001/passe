@@ -60,12 +60,12 @@ class TestBasicParsing:
             ("screenshot", ["/tmp/x.png"])
         ]
 
-    def test_wait_with_milliseconds(self):
-        assert parse_script("wait 500") == [("wait", ["500"])]
+    def test_wait_with_seconds(self):
+        assert parse_script("wait 0.5") == [("wait", ["0.5"])]
 
     def test_wait_for_with_timeout(self):
-        assert parse_script("wait-for .results 5000") == [
-            ("wait-for", [".results", "5000"])
+        assert parse_script("wait-for .results 5") == [
+            ("wait-for", [".results", "5"])
         ]
 
     def test_scroll_two_coords(self):
@@ -306,13 +306,13 @@ snapshot /tmp/elements.txt"""
     def test_cookie_banner_flow(self):
         script = """goto https://example.com
 click-text "Reject"
-wait 500
+wait 0.5
 screenshot /tmp/after-cookies.png"""
         result = parse_script(script)
         assert len(result) == 4
         assert result[0] == ("goto", ["https://example.com"])
         assert result[1] == ("click-text", ["Reject"])
-        assert result[2] == ("wait", ["500"])
+        assert result[2] == ("wait", ["0.5"])
         assert result[3] == ("screenshot", ["/tmp/after-cookies.png"])
 
     def test_form_fill_flow(self):
@@ -320,13 +320,13 @@ screenshot /tmp/after-cookies.png"""
 type "input[name='email']" "test@example.com"
 type "input[name='password']" "hunter2"
 click "#submit"
-wait-for .dashboard 15000
+wait-for .dashboard 15
 screenshot /tmp/logged-in.png"""
         result = parse_script(script)
         assert len(result) == 6
         assert result[1] == ("type", ["input[name='email']", "test@example.com"])
         assert result[2] == ("type", ["input[name='password']", "hunter2"])
-        assert result[4] == ("wait-for", [".dashboard", "15000"])
+        assert result[4] == ("wait-for", [".dashboard", "15"])
 
     def test_inline_semicolon_converted(self):
         """cmd_run splits on '; ' before verb keywords, then parse_script
@@ -534,13 +534,13 @@ class TestRegressions:
 
     def test_inline_multiple_verbs_no_js_semicolons(self):
         """Plain multi-verb inline splits cleanly."""
-        inline = 'goto https://example.com; wait 500; screenshot /tmp/out.png'
+        inline = 'goto https://example.com; wait 0.5; screenshot /tmp/out.png'
         text = split_inline(inline)
         steps = parse_script(text)
 
         assert len(steps) == 3
         assert steps[0][0] == 'goto'
-        assert steps[1] == ('wait', ['500'])
+        assert steps[1] == ('wait', ['0.5'])
         assert steps[2][0] == 'screenshot'
 
     def test_inline_no_space_after_semicolon_preserved(self):
