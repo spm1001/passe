@@ -85,10 +85,10 @@ def _emit_fetch_hint(steps):
         while j < len(steps) and steps[j][0] == 'wait':
             saw_wait = True
             j += 1
-        if j < len(steps) and steps[j][0] == 'read':
+        if j < len(steps) and steps[j][0] in ('read', 'extract'):
             if not hinted_fetch:
                 print('[passe] hint: fetch URL [path] combines '
-                      'goto+wait+read in one step', file=sys.stderr)
+                      'goto+wait+extract in one step', file=sys.stderr)
                 hinted_fetch = True
             if saw_wait and not hinted_wait:
                 print('[passe] hint: read auto-waits after goto '
@@ -514,9 +514,9 @@ def cmd_explain(source: str, inline: str = None):
         while j < len(steps) and steps[j][0] == 'wait':
             saw_wait = True
             j += 1
-        if j < len(steps) and steps[j][0] == 'read':
-            warnings.append('goto+read detected — use fetch verb instead '
-                            '(goto + auto-wait + read in one step)')
+        if j < len(steps) and steps[j][0] in ('read', 'extract'):
+            warnings.append('goto+extract detected — use fetch verb instead '
+                            '(goto + auto-wait + extract in one step)')
             if saw_wait:
                 warnings.append('Explicit wait before read is unnecessary — '
                                 'read auto-waits after navigation verbs')

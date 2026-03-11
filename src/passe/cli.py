@@ -125,7 +125,7 @@ Observation:
                             --viewport for visible area only. Flags: --fast, --viewport, --format, --quality
   snapshot [path]           List interactive elements with CSS selectors
   read [flags] [path]       Extract page content as markdown (flags: --source, --no-wait)
-  fetch <url> [flags] [path] goto + auto-wait + read in one step (flags: --source)
+  fetch <url> [flags] [path] goto + auto-wait + extract in one step (flags: --source)
   eval <expression>         Run JS, result to stdout
   eval-to <path> <expr>     Run JS, write result to file
   eval-file <js-path>       Run JS from file
@@ -232,13 +232,39 @@ def main():
                                 keep_on_fail=not no_keep_on_fail,
                                 flash=flash_val, foreground=foreground,
                                 device=device_name, dpr=dpr_val))
-        elif len(run_args) == 1:
-            # passe run [-flags] script.passe  OR  passe run [-flags] -
-            _run(cmd_run(run_args[0],
-                                keep_tab=keep_tab, reuse_tab=reuse_tab,
-                                keep_on_fail=not no_keep_on_fail,
-                                flash=flash_val, foreground=foreground,
-                                device=device_name, dpr=dpr_val))
+        elif len(run_args) >= 1:
+            arg = run_args[0]
+            if arg == '-' or os.path.isfile(arg):
+                # stdin or file — pass as script path
+                _run(cmd_run(arg,
+                                    keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                    keep_on_fail=not no_keep_on_fail,
+                                    flash=flash_val, foreground=foreground,
+                                    device=device_name, dpr=dpr_val))
+            else:
+                # Auto-detect inline script: join all args, check for
+                # known verbs. File always wins (checked above).
+                inline_text = ' '.join(run_args)
+                import shlex
+                try:
+                    first_word = shlex.split(inline_text)[0]
+                except (ValueError, IndexError):
+                    first_word = ''
+                if first_word in KNOWN_VERBS:
+                    if not quiet:
+                        print('[passe] treating argument as inline script'
+                              ' (use -c to be explicit)',
+                              file=sys.stderr)
+                    _run(cmd_run(None, inline=inline_text,
+                                        keep_tab=keep_tab, reuse_tab=reuse_tab,
+                                        keep_on_fail=not no_keep_on_fail,
+                                        flash=flash_val, foreground=foreground,
+                                        device=device_name, dpr=dpr_val))
+                else:
+                    print(f'passe run: {arg!r} is not a file and '
+                          f'doesn\'t start with a known verb',
+                          file=sys.stderr)
+                    sys.exit(1)
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)

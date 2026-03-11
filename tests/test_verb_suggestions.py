@@ -42,10 +42,10 @@ class TestVerbSuggestions:
         assert not result['ok']
         assert 'did you mean "wait"' in result['error']
 
-    def test_extract_suggests_read(self):
-        result = _run('extract /tmp/out.md')
+    def test_scrape_suggests_extract(self):
+        result = _run('scrape /tmp/out.md')
         assert not result['ok']
-        assert 'did you mean "read"' in result['error']
+        assert 'did you mean "extract"' in result['error']
 
     def test_enter_suggests_press_with_hint(self):
         result = _run('enter')
