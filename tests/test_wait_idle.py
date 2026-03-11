@@ -149,7 +149,7 @@ async def test_wait_idle_returns_immediately_when_idle():
     client = _mock_client()
     # Already idle (inflight = 0, event set)
 
-    result = await do_wait_idle(client, timeout_ms=5000, debounce_ms=100)
+    result = await do_wait_idle(client, timeout=5, debounce_ms=100)
 
     assert result['timed_out'] is False
     # Should settle quickly (just the debounce period)
@@ -166,7 +166,7 @@ async def test_wait_idle_times_out():
     client._inflight_count = 1
     client._network_idle_event.clear()
 
-    result = await do_wait_idle(client, timeout_ms=200, debounce_ms=100)
+    result = await do_wait_idle(client, timeout=0.2, debounce_ms=100)
 
     assert result['timed_out'] is True
 
@@ -216,7 +216,7 @@ async def test_run_script_wait_idle_with_timeout_arg(capsys):
     assert result['ok'] is True
 
     stderr = capsys.readouterr().err
-    assert '[wait-idle] Timed out' in stderr
+    assert '[wait] network idle timed out' in stderr
     json_lines = [json.loads(line) for line in stderr.strip().split('\n')
                   if line.strip().startswith('{')]
     step = json_lines[0]

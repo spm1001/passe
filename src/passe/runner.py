@@ -15,18 +15,48 @@ from passe.parser import (
 )
 from passe.verbs import (
     do_navigate, do_back, do_forward, do_wait_idle,
-    do_click, do_click_text, do_click_if, do_fill, do_type, do_select,
+    do_click, do_click_text, do_fill, do_type, do_select,
     do_press, do_hover, do_tap, do_swipe, do_scroll,
     do_screenshot, do_snapshot, do_read, do_fetch,
-    do_device, do_viewport, do_wait_for, do_wait_navigation, do_wait_stable,
+    do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
     do_assert, do_watch,
 )
 
 
-def _secs_to_ms(s: str, default_ms: int) -> int:
-    """Parse a user-facing seconds arg to internal milliseconds."""
-    return int(float(s) * 1000) if s else default_ms
+def _parse_timeout(s: str, default: float) -> float:
+    """Parse a user-facing seconds arg. Returns seconds as float."""
+    return float(s) if s else default
+
+
+# Characters that signal a CSS selector, not plain text.
+_CSS_CHARS = set('.#[:>~+')
+
+
+def _is_css_selector(arg: str) -> bool:
+    """Return True if arg looks like a CSS selector, False if it's plain text."""
+    return bool(arg) and any(c in arg for c in _CSS_CHARS)
+
+
+def _classify_wait_arg(arg: str) -> str:
+    """Classify a wait argument as 'seconds', 'selector', or 'ambiguous'.
+
+    - Starts with . # [ or contains > : ~ + → 'selector'
+    - Parses as float → 'seconds'
+    - Otherwise → 'ambiguous'
+    """
+    if not arg:
+        return 'ambiguous'
+    # Float check first for leading-dot numbers like .5 (= 0.5 seconds)
+    try:
+        float(arg)
+        return 'seconds'
+    except ValueError:
+        pass
+    # CSS indicators: starts with selector-start chars, or contains combinator/pseudo chars
+    if arg[0] in '.#[:' or any(c in arg for c in '>~+'):
+        return 'selector'
+    return 'ambiguous'
 
 
 # Verbs where a failure should auto-snapshot to show what's on the page.
@@ -114,12 +144,11 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 step_info['url'] = nav['url']
                 if nav['status_code'] is not None:
                     step_info['status_code'] = nav['status_code']
-            elif verb == 'click':
-                await do_click(client, args[0])
-            elif verb == 'click-text':
-                await do_click_text(client, args[0])
-            elif verb == 'click-if':
-                await do_click_if(client, args[0])
+            elif verb in ('click', 'click-text'):
+                if verb == 'click-text' or not _is_css_selector(args[0]):
+                    await do_click_text(client, args[0])
+                else:
+                    await do_click(client, args[0])
             elif verb == 'fill':
                 await do_fill(client, args[0], args[1])
             elif verb == 'type':
@@ -286,35 +315,59 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 w_args = list(args)
                 w_fast = '--fast' in w_args
                 w_args = [a for a in w_args if a != '--fast']
-                w_cooldown = 1000
+                w_cooldown_ms = 1000
                 if '--cooldown' in w_args:
                     idx = w_args.index('--cooldown')
                     if idx + 1 < len(w_args):
-                        w_cooldown = int(w_args[idx + 1])
+                        w_cooldown_ms = int(float(w_args[idx + 1]) * 1000)
                         del w_args[idx:idx + 2]
                 w_path = w_args[0] if w_args else '/tmp/passe-watch.jpg'
-                await do_watch(client, w_path, fast=w_fast, cooldown_ms=w_cooldown)
+                await do_watch(client, w_path, fast=w_fast, cooldown_ms=w_cooldown_ms)
                 # do_watch only returns on cancellation — skip remaining steps
                 break
-            elif verb == 'wait':
-                secs = float(args[0])
-                if secs >= 30:
-                    print(f'[wait] {secs}s is a long wait — did you mean '
-                          f'seconds? (wait 0.5 = 500ms)', file=sys.stderr)
-                await asyncio.sleep(secs)
-            elif verb == 'wait-for':
-                timeout_ms = _secs_to_ms(args[1] if len(args) > 1 else '', 10000)
-                await do_wait_for(client, args[0], timeout_ms)
-            elif verb == 'wait-idle':
-                timeout_ms = _secs_to_ms(args[0] if args else '', 30000)
-                idle_result = await do_wait_idle(client, timeout_ms=timeout_ms)
-                step_info['settled_after_ms'] = idle_result['settled_after_ms']
-                if idle_result['timed_out']:
-                    step_info['timed_out'] = True
-                    print(f'[wait-idle] Timed out after {timeout_ms / 1000}s — '
-                          f'network did not settle', file=sys.stderr)
-            elif verb == 'wait-navigation':
-                await do_wait_navigation(client)
+            elif verb in ('wait', 'wait-for', 'wait-idle'):
+                if verb == 'wait-for':
+                    # Explicit alias: wait-for <selector> [timeout]
+                    timeout = _parse_timeout(
+                        args[1] if len(args) > 1 else '', 10)
+                    await do_wait_for(client, args[0], timeout)
+                elif verb == 'wait-idle':
+                    # Explicit alias: wait-idle [timeout]
+                    timeout = _parse_timeout(args[0] if args else '', 30)
+                    idle_result = await do_wait_idle(client, timeout=timeout)
+                    step_info['settled_after_ms'] = idle_result['settled_after_ms']
+                    if idle_result['timed_out']:
+                        step_info['timed_out'] = True
+                        print(f'[wait] network idle timed out after '
+                              f'{timeout}s', file=sys.stderr)
+                elif not args:
+                    # Bare wait → network idle (default 30s)
+                    idle_result = await do_wait_idle(client, timeout=30)
+                    step_info['settled_after_ms'] = idle_result['settled_after_ms']
+                    if idle_result['timed_out']:
+                        step_info['timed_out'] = True
+                        print('[wait] network idle timed out after 30s',
+                              file=sys.stderr)
+                else:
+                    kind = _classify_wait_arg(args[0])
+                    if kind == 'seconds':
+                        secs = float(args[0])
+                        if secs >= 30:
+                            print(f'[wait] {secs}s is a long wait — did you '
+                                  f'mean seconds? (wait 0.5 = 500ms)',
+                                  file=sys.stderr)
+                        await asyncio.sleep(secs)
+                    elif kind == 'selector':
+                        timeout = _parse_timeout(
+                            args[1] if len(args) > 1 else '', 10)
+                        await do_wait_for(client, args[0], timeout)
+                    else:
+                        raise ValueError(
+                            f'Ambiguous wait argument: {args[0]!r} — '
+                            f'use a number for seconds (wait 3), '
+                            f'a CSS selector (wait .results), '
+                            f'or bare wait for network idle'
+                        )
             elif verb == 'back':
                 step_info['url'] = await do_back(client)
             elif verb == 'forward':

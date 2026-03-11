@@ -83,11 +83,11 @@ passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 # Longer scripts (5+ verbs): heredoc
 passe run - <<'EOF'
 goto https://example.com
-click-text "Accept Cookies"
+click "Accept Cookies"
 wait 0.5
 type "#search" "query"
 press Enter
-wait-for .results
+wait .results
 screenshot /tmp/results.png
 EOF
 
@@ -111,9 +111,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Navigation:** `goto <url>` — raises on navigation failure (DNS, refused, chrome-error://). Step NDJSON: `url`, `status_code`. `back`, `forward` (step NDJSON: `url`). `scroll <x> <y>` (rarely needed — most verbs work regardless of scroll position)
 
 **Interaction:**
-- `click <selector>` — CSS selector
-- `click-text <"label">` — find by visible text, click
-- `click-if <selector>` — click if exists, silently continue if not
+- `click <selector-or-text>` — smart dispatch: CSS (`. # [ : > ~ +`) → querySelector; plain text → find by visible text content. `click "Reject"` for text, `click ".btn"` for CSS.
 - `type <selector> <text>` — character-by-character via CDP. **Use for SPAs.** Auto-detects React controlled inputs and falls back to nativeInputValueSetter + synthetic events + 100ms reconciliation delay. `press Enter` after `type` works correctly on React/Streamlit.
 - `fill <selector> <value>` — set value directly. Fast but may skip React/Vue reactivity.
 - `select <selector> <value>` — dropdown
@@ -142,8 +140,8 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 - `bring-to-front` — make the tab visible and focused. Required for `jsaction` sites (Google Groups) that only bind handlers to visible elements.
 
 **Control:**
-- `wait <seconds>` (decimal ok: `wait 0.5`), `wait-for <selector> [seconds]` (default 10), `wait-idle [seconds]` (default 30, network settles — replaces guessed waits), `wait-navigation`
-- `watch [--fast] [--cooldown <ms>] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Cooldown 1000ms default (prevents screenshot storms). Screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
+- `wait` — **one verb, three behaviors**: `wait 3` (sleep 3s), `wait .results` (CSS selector, default 10s timeout), bare `wait` (network idle, default 30s). CSS detected by leading `. # [ :` or containing `> ~ +`. `wait-for` and `wait-idle` still work as explicit aliases.
+- `watch [--fast] [--cooldown <seconds>] <path>` — **HMR-triggered auto-screenshot.** Listens for Vite `[vite] hot updated` and `[vite] page reload` console messages + DOM mutations (Tailwind CSS). Cooldown 1s default (prevents screenshot storms). Screenshots to path (overwrite each time). Stays alive until killed. Use with `Bash run_in_background`. NDJSON events: `watch_started`, `hmr`/`mutation`/`reload` (with `screenshot_ms`, `kb`), `watch_stopped`.
 - `assert <expression>` — fail script if falsy. Sub-millisecond.
 - `log <message>` — print to stderr
 
@@ -213,7 +211,7 @@ Two Bash calls total.
 
 ### Cookie banners: always scout
 
-**Do NOT guess cookie button text.** Button labels vary wildly between sites, and `click-text` fails on doubled text from icon+label combinations (e.g. `snapshot` shows `"RejectReject All Cookies"`). Always scout first:
+**Do NOT guess cookie button text.** Button labels vary wildly between sites, and text click fails on doubled text from icon+label combinations (e.g. `snapshot` shows `"RejectReject All Cookies"`). Always scout first:
 
 ```bash
 # Scout to find the actual button
@@ -237,7 +235,7 @@ EOF
 passe run - <<'EOF'
 capture /tmp/reqs.jsonl
 goto https://spa.example.com
-click-text "Search"
+click "Search"
 type "#query" "parental leave"
 press Enter
 wait 2
@@ -339,14 +337,14 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 ## Anti-patterns
 
 - **`fill` vs `type`**: Default to `type` for SPAs. `fill` is for plain HTML forms only.
-- **Guessing cookie button text**: `click-text "Reject"` fails more often than it works. Scout first.
-- **`click-text` with multiple matches**: Clicks first visible match. Be specific.
+- **Guessing cookie button text**: `click "Reject"` fails more often than it works. Scout first.
+- **`click` with text — multiple matches**: Clicks first visible match. Be specific.
 - **Tab handling**: Default mode creates and closes its own tab on success. On failure, the tab is kept with a 30s flash timer. Use `--reuse-tab` to attach to the user's visible tab (see Tab modes).
-- **Script errors are fatal** but **self-healing on interaction failures**: When `click`, `click-text`, `type`, `fill`, `select`, `hover`, or `tap` fail (e.g. selector not found), passe auto-runs a snapshot and includes the top 10 interactive elements in the error output. Read the error — it tells you what's on the page so you can fix the selector without a separate snapshot call.
+- **Script errors are fatal** but **self-healing on interaction failures**: When `click`, `type`, `fill`, `select`, `hover`, or `tap` fail (e.g. selector not found), passe auto-runs a snapshot and includes the top 10 interactive elements in the error output. Read the error — it tells you what's on the page so you can fix the selector without a separate snapshot call.
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
-- **Arbitrary `wait` durations**: Don't guess (`wait 2`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use `wait-idle` (waits for network to settle) or `wait-for <selector>` for a specific element. `wait-idle` is the better default — it's deterministic and replaces guessed delays.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use bare `wait` (network idle) or `wait .selector` for a specific element. Bare `wait` is the better default — it's deterministic and replaces guessed delays.
 - **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
 ## Subcommands (no DSL needed)
@@ -362,7 +360,7 @@ passe look https://example.com /tmp/result.jpg    # explicit path
 passe check https://example.com --contains "Welcome"
 passe check https://example.com --contains "Dashboard" --screenshot /tmp/proof.jpg
 
-# Record network requests (goto + wait-idle + capture to JSONL)
+# Record network requests (goto + network idle + capture to JSONL)
 passe capture https://spa.example.com /tmp/reqs.jsonl
 passe capture --bodies https://spa.example.com /tmp/reqs.jsonl  # include response bodies
 

@@ -396,10 +396,6 @@ class TestEdgeCases:
         result = parse_script("back")
         assert result == [("back", [])]
 
-    def test_click_if_css_selector(self):
-        result = parse_script('click-if ".cookie-banner .dismiss"')
-        assert result == [("click-if", [".cookie-banner .dismiss"])]
-
     def test_hover_selector(self):
         result = parse_script('hover "nav > a:first-child"')
         assert result == [("hover", ["nav > a:first-child"])]

@@ -400,7 +400,7 @@ async def cmd_capture(url: str, path: str, bodies: bool = False,
         try:
             t0 = time.monotonic()
             nav = await do_navigate(client, url)
-            await do_wait_idle(client, timeout_ms=30000)
+            await do_wait_idle(client, timeout=30)
 
             requests = client.get_network_requests()
             if bodies:

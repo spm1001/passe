@@ -58,20 +58,21 @@ async def do_forward(client: CDPClient) -> str:
     return await do_eval(client, 'window.location.href')
 
 
-async def do_wait_idle(client: CDPClient, timeout_ms: int = 30000,
+async def do_wait_idle(client: CDPClient, timeout: float = 30,
                        debounce_ms: int = 500) -> dict:
     """Wait until network requests settle (in-flight count at zero for debounce_ms).
 
-    Returns {'settled_after_ms': N, 'timed_out': bool}.
+    timeout is in seconds. Returns {'settled_after_ms': N, 'timed_out': bool}.
     """
     await client.ensure_network()
-    deadline = time.monotonic() + timeout_ms / 1000
+    start = time.monotonic()
+    deadline = start + timeout
     settled_start = None
 
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return {'settled_after_ms': timeout_ms, 'timed_out': True}
+            return {'settled_after_ms': round(timeout * 1000), 'timed_out': True}
 
         if client._inflight_count == 0:
             if settled_start is None:
@@ -80,7 +81,7 @@ async def do_wait_idle(client: CDPClient, timeout_ms: int = 30000,
             if elapsed_idle >= debounce_ms:
                 return {
                     'settled_after_ms': round(
-                        (time.monotonic() - (deadline - timeout_ms / 1000)) * 1000, 1
+                        (time.monotonic() - start) * 1000, 1
                     ),
                     'timed_out': False,
                 }
@@ -150,17 +151,6 @@ async def do_click_text(client: CDPClient, label: str):
     if 'exceptionDetails' in result.get('result', {}):
         desc = result['result']['exceptionDetails'].get('exception', {}).get('description', '')
         raise RuntimeError(f'click-text failed: {desc}')
-
-
-async def do_click_if(client: CDPClient, selector: str):
-    js = f'''(() => {{
-        const el = document.querySelector({json.dumps(selector)});
-        if (el) {{ el.click(); return 'clicked'; }}
-        return 'not-found';
-    }})()'''
-    await client.send('Runtime.evaluate', {
-        'expression': js, 'awaitPromise': False
-    })
 
 
 async def do_fill(client: CDPClient, selector: str, value: str):
@@ -1049,10 +1039,10 @@ async def do_viewport(client: CDPClient, width: int, height: int):
     })
 
 
-async def do_wait_for(client: CDPClient, selector: str, timeout_ms: int = 10000):
-    """Poll for selector until visible or timeout."""
+async def do_wait_for(client: CDPClient, selector: str, timeout: float = 10):
+    """Poll for selector until visible or timeout. timeout is in seconds."""
     js = f'''document.querySelector({json.dumps(selector)}) !== null'''
-    deadline = time.monotonic() + timeout_ms / 1000
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         result = await client.send('Runtime.evaluate', {
             'expression': js, 'awaitPromise': False
@@ -1060,12 +1050,7 @@ async def do_wait_for(client: CDPClient, selector: str, timeout_ms: int = 10000)
         if result['result']['result'].get('value') is True:
             return
         await asyncio.sleep(0.1)
-    raise RuntimeError(f'wait-for timed out after {timeout_ms}ms: {selector}')
-
-
-async def do_wait_navigation(client: CDPClient):
-    await client.send('Page.enable')
-    await client.wait_for_event('Page.loadEventFired', timeout=15.0)
+    raise RuntimeError(f'wait-for timed out after {timeout}s: {selector}')
 
 
 async def do_wait_stable(client: CDPClient, timeout_ms: int = 2000) -> bool:

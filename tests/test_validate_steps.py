@@ -41,7 +41,6 @@ def test_zero_arg_verbs_ok():
         ('back', []),
         ('forward', []),
         ('wait-idle', []),
-        ('wait-navigation', []),
         ('screenshot', []),
         ('snapshot', []),
         ('read', []),

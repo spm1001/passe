@@ -30,10 +30,10 @@ from passe.parser import (  # noqa: F401
 )
 from passe.verbs import (  # noqa: F401
     do_navigate, do_back, do_forward, do_wait_idle,
-    do_click, do_click_text, do_click_if, do_fill, do_type, do_select,
+    do_click, do_click_text, do_fill, do_type, do_select,
     do_press, do_hover, do_tap, do_swipe, do_scroll,
     do_screenshot, do_snapshot, do_read, do_fetch,
-    do_device, do_viewport, do_wait_for, do_wait_navigation, do_wait_stable,
+    do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
     do_assert, do_watch, _check_thin_read,
 )

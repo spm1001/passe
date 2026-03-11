@@ -83,11 +83,11 @@ passe run -c 'goto https://example.com; screenshot /tmp/out.png'
 # Longer scripts (5+ verbs): heredoc. ALWAYS use this for complex flows.
 passe run - <<'EOF'
 goto https://example.com
-click-text "Accept Cookies"
+click "Accept Cookies"
 wait 0.5
 type "#search" "query"
 press Enter
-wait-for .results
+wait .results
 screenshot /tmp/results.png
 EOF
 
@@ -114,9 +114,7 @@ passe run tests/checkout-flow.passe
 - `scroll <x> <y>` — window.scrollTo
 
 **Interaction:**
-- `click <selector>` — CSS selector click
-- `click-text <"label">` — find by text content, click. Great for cookie banners: `click-text "Reject"`
-- `click-if <selector>` — click if exists, silently continue if not. For optional elements.
+- `click <selector-or-text>` — smart dispatch: CSS selector (contains `. # [ : > ~ +`) → `querySelector`; plain text → find by text content and click. `click "Reject"` works for cookie banners, `click ".btn"` for selectors.
 - `type <selector> <text>` — character-by-character via `Input.insertText`. Works with React, Vue, and plain HTML. Auto-detects controlled inputs and falls back to `nativeInputValueSetter` if needed.
 - `fill <selector> <value>` — set value directly. Faster but may not trigger framework reactivity. Use `type` if unsure.
 - `select <selector> <value>` — dropdown
@@ -143,11 +141,12 @@ passe run tests/checkout-flow.passe
 - `bring-to-front` — make the tab visible and focused (`Page.bringToFront`). Required for sites that use `jsaction` (e.g. Google Groups) which only bind click handlers to visible elements.
 
 **Control:**
-- `wait <seconds>` — sleep. Decimal for sub-second: `wait 3` = 3s, `wait 0.5` = 500ms.
-- `wait-for <selector> [seconds]` — wait until selector matches visible element. Default 10. **Critical for SPAs.**
-- `wait-idle [seconds]` — wait until network requests settle (in-flight count at zero for 500ms). Default 30. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use `wait-idle` instead of guessed `wait` delays. Step NDJSON: `settled_after_ms`, `timed_out`. **Caveat:** sites with analytics beacons, websockets, or long-polling may never settle — use a short timeout (e.g. `wait-idle 5`) or prefer `wait-for <selector>` when you know what content to expect.
-- `wait-navigation` — wait for page load event
-- `watch [--fast] [--cooldown <ms>] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Three debounce layers: JS MutationObserver (150ms clusters rapid DOM changes), Python drain (100ms batches queued events), cooldown (default 1000ms, min interval between captures). Leading + trailing edge: captures immediately on first change, then once more after cooldown to get the final state. Runs until killed. Use with `Bash run_in_background`.
+- `wait` — **one verb, three behaviors** based on argument shape:
+  - `wait <seconds>` — sleep. `wait 3` = 3s, `wait 0.5` = 500ms.
+  - `wait <selector> [timeout]` — wait until CSS selector matches visible element. Default timeout 10s. CSS detected by leading `.` `#` `[` `:` or containing `>` `~` `+`.
+  - `wait` (bare, no args) — wait until network requests settle (in-flight count at zero for 500ms). Default timeout 30s. Step NDJSON: `settled_after_ms`, `timed_out`. **The fix for SPA click-navigation**: after a click triggers a client-side route change, auto-wait doesn't fire — use bare `wait` instead of guessed delays. **Caveat:** sites with analytics beacons, websockets, or long-polling may never settle — use `wait-for` with a short timeout or prefer `wait .selector` when you know what content to expect.
+  - `wait-for` and `wait-idle` still work as explicit aliases if you prefer clarity.
+- `watch [--fast] [--cooldown <seconds>] <path>` — HMR-triggered auto-screenshot. Listens for Vite HMR console messages + DOM mutations. Three debounce layers: JS MutationObserver (150ms clusters rapid DOM changes), Python drain (100ms batches queued events), cooldown (default 1s, min interval between captures). Leading + trailing edge: captures immediately on first change, then once more after cooldown to get the final state. Runs until killed. Use with `Bash run_in_background`.
 - `assert <expression>` — eval JS, fail script if falsy. Error shows actual value.
 - `log <message>` — print to stderr
 
@@ -189,7 +188,7 @@ screenshot /tmp/result.png
 EOF
 ```
 
-Two Bash calls. For simple cases (cookie banners with obvious text), skip the scout and use `click-text "Reject"` directly.
+Two Bash calls. For simple cases (cookie banners with obvious text), skip the scout and use `click "Reject"` directly.
 
 ## Authenticated API pattern
 
@@ -210,10 +209,11 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 1. **`fill` vs `type`**: Default to `type` for any SPA. `fill` is a speed optimisation for plain HTML forms only.
 2. **`type` on React controlled inputs**: `type` now auto-detects when CDP key events don't take (React controlled components). After typing, it checks the element's value — if it doesn't match, it automatically falls back to: re-focus the element, `nativeInputValueSetter`, `dispatchEvent('input')`, `dispatchEvent('change')`, then a 100ms delay for React to reconcile before the next verb runs. You'll see `[type] React controlled input detected` on stderr when this happens. `press Enter` after `type` works correctly — the reconciliation delay ensures React has processed the input event before the keypress fires. No manual workaround needed.
 3. **`read` extraction cascade**: **Content-type sniffing runs first** — if `document.contentType` is structured data (JSON, XML, CSV, plain text, YAML), the extraction cascade is bypassed entirely and raw content is returned (JSON is pretty-printed). **Apple Developer Documentation** (`developer.apple.com/documentation/*`) is auto-detected and fetched from the structured JSON endpoint — produces clean markdown with declarations, code examples, and topic sections (the HTML page is JS-rendered and times out all extractors). For HTML pages, trafilatura handles most pages well (articles, dashboards, SPAs). When trafilatura returns None or <10% of page text, it falls through to Readability.js+Turndown, then to innerText. Warnings on stderr when extraction looks incomplete (including when trafilatura import fails or throws). The `source` field in step output tells you which extractor was used (`raw`, `trafilatura`, `readability`, or `innerText`). Shadow DOM content is now flattened before serialization — web components (e.g. MDN's `<mdn-code-example>`) are inlined into the HTML so both extractors can see them. A structural quality gate detects when trafilatura drops tables or code blocks: it counts pipe-table rows and code fences in the output, compares against DOM signals (table data rows, `<pre>` blocks), and falls through to Readability if significant structure was lost (e.g. ISO country codes page: 294 data rows stripped → Readability preserves them). **Thin-read diagnostics**: when extraction returns <200 chars and the page isn't genuinely small, a `thin_read` diagnostic is emitted in step NDJSON with `word_count`, `extracted_chars`, `page_text_chars`, `html_chars`, `title`, and `possible_cause` (one of `auth_wall`, `empty_page`, `js_hydration`, `unknown`). Warning also on stderr. Suppressed for legitimately small pages (high extraction ratio with ≥100 chars of page text). Known weaknesses: (a) pages with cookie banners blocking content, (b) JS animations producing garbage HTML, (c) infinite scroll pages. Use `read --source readability` or `read --source innertext` to bypass the cascade for debugging. Use `--source raw` to force raw passthrough on any page. Use `eval` with `innerText` as a deliberate escape hatch.
-3a. **Auto-wait and SPA client-side navigation**: `read` auto-waits for DOM stability after `goto`/`back`/`forward` — no explicit `wait` needed. Uses dual-signal polling (element count + text length). But auto-wait does NOT fire after `click` — SPA client-side route changes (React Router, Next.js) happen via click without a page navigation. For these, use `wait-idle` (waits for network to settle) or `wait-for .new-content-selector` between click and read. `wait-idle` is the better default — it replaces guessed `wait 0.5`/`wait 1` delays with a deterministic signal. The `fetch` verb always auto-waits (no `--no-wait` option — use `goto; read --no-wait` for granular control).
+3a. **Auto-wait and SPA client-side navigation**: `read` auto-waits for DOM stability after `goto`/`back`/`forward` — no explicit `wait` needed. Uses dual-signal polling (element count + text length). But auto-wait does NOT fire after `click` — SPA client-side route changes (React Router, Next.js) happen via click without a page navigation. For these, use bare `wait` (network idle) or `wait .new-content-selector` between click and read. Bare `wait` is the better default — it replaces guessed `wait 0.5`/`wait 1` delays with a deterministic signal. The `fetch` verb always auto-waits (no `--no-wait` option — use `goto; read --no-wait` for granular control).
 4. **Full-page screenshots on infinite scroll**: Capped at 16384px height. Still potentially large.
-5. **`click-text` with multiple matches**: Clicks the first visible match. Be specific.
-6. **Cookie banner button text**: Don't guess — button labels vary between sites and `click-text` fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
+5. **`click` with text — multiple matches**: When clicking by text, clicks the first visible match. Be specific.
+5a. **`click` smart dispatch**: `click` uses CSS chars (`. # [ : > ~ +`) to decide between selector and text. HTML tag names without CSS chars (`click "button"`, `click "div"`) are treated as **text**, not tag selectors. If you need `querySelector("button")`, use a CSS-specific form: `click "button:first-of-type"` or `click "[type=submit]"`.
+6. **Cookie banner button text**: Don't guess — button labels vary between sites and text click fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
 7. **Tab handling**: `passe run` creates its own tab. On success, the tab is closed. **On failure, the tab is kept open** with a 30s flash timer — it auto-closes unless the user interacts (click/keypress/scroll). Stderr shows `passe run --reuse-tab -c "..."` to resume. `--flash [secs]` explicitly keeps a tab with auto-close (default 30s, implies `--keep-tab`). `--keep-tab` keeps without timer. `--no-keep-on-fail` forces cleanup on failure. Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
 8. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 9. **DOM mutation during TreeWalker**: If using `eval` with `createTreeWalker` to walk and mutate the DOM (e.g. `replaceChild`), the walker loses its position and silently stops after 1-2 nodes. Collect nodes into an array first, then mutate in a second pass.
@@ -233,7 +233,7 @@ passe look https://example.com /tmp/out.jpg # Explicit path
 passe check https://example.com --contains "Welcome"           # Assert text present (exit 0/1)
 passe check https://example.com --contains "OK" --screenshot /tmp/proof.jpg
 
-passe capture https://example.com /tmp/reqs.jsonl              # Goto + wait-idle + network JSONL
+passe capture https://example.com /tmp/reqs.jsonl              # Goto + network idle + network JSONL
 passe capture --bodies https://example.com /tmp/reqs.jsonl     # Include response bodies
 
 passe fetch https://example.com              # Goto + auto-wait + read (short content inlined)
@@ -284,12 +284,12 @@ Dependency graph is a strict DAG: parser/client (foundation) → connection/verb
 
 `CDPClient.BUFFERED_EVENTS` is a frozenset whitelist of events to buffer when no waiter is registered. Currently only `Page.loadEventFired`. The buffer is `dict[str, dict]` (one entry per method name) — max size equals whitelist size.
 
-When a `wait_for_event` waiter is active, events go directly to the waiter. When a waiter has timed out (stale cancelled future), `_receiver` falls through to the buffer instead of silently dropping the event. This matters for the `click → wait-navigation` pattern where navigation completes between the click and the wait.
+When a `wait_for_event` waiter is active, events go directly to the waiter. When a waiter has timed out (stale cancelled future), `_receiver` falls through to the buffer instead of silently dropping the event.
 
 `src/passe/_libs.py` holds all JS constants that run inside Chrome. Third-party vendored: Readability.js (Mozilla) and Turndown.js. Our code: `SHADOW_FLATTEN_JS` (serializes outerHTML with shadow DOM inlined) and `EXTRACT_JS` (orchestrates Readability+Turndown). The primary `read` path gets flattened outerHTML from Chrome and runs trafilatura Python-side; the browser-side libs are the fallback.
 
 ### Network capture
 
-`CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. The collector doesn't consume events — they still flow to waiters and queues, allowing future features (wait-idle) to coexist on the same event stream.
+`CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. The collector doesn't consume events — they still flow to waiters and queues, so network idle detection (bare `wait`) coexists on the same event stream.
 
 No external dependencies beyond `websockets` (and `trafilatura` for content extraction). Everything else runs in Chrome's V8.
