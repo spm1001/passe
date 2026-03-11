@@ -8,9 +8,9 @@ CONTENT_INLINE_THRESHOLD = 2000
 
 
 KNOWN_VERBS = {
-    'goto', 'click', 'click-text', 'click-if', 'fill', 'type', 'select',
+    'goto', 'click', 'click-text', 'fill', 'type', 'select',
     'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
-    'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle', 'wait-navigation',
+    'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log', 'bring-to-front',
 }
@@ -46,6 +46,8 @@ VERB_SUGGESTIONS = {
     'scroll-up': ('scroll', 'scroll uses coordinates: scroll 0 -500'),
     'scroll-left': ('scroll', 'scroll uses coordinates: scroll -500 0'),
     'scroll-right': ('scroll', 'scroll uses coordinates: scroll 500 0'),
+    'click-if': ('click', 'click-if was removed — use click or eval to check first'),
+    'wait-navigation': ('wait', 'wait-navigation was removed — use bare wait for network idle'),
 }
 
 # Direction words used as args to scroll (e.g. "scroll down 500")
@@ -55,12 +57,12 @@ SCROLL_DIRECTIONS = {'up', 'down', 'left', 'right'}
 # Minimum argument counts per verb, derived from run_script dispatch.
 # Verbs not listed here accept 0 args.
 VERB_MIN_ARGS = {
-    'goto': 1, 'click': 1, 'click-text': 1, 'click-if': 1,
+    'goto': 1, 'click': 1, 'click-text': 1,
     'fill': 2, 'type': 2, 'select': 2,
     'press': 1, 'hover': 1, 'tap': 1, 'swipe': 2,
     'scroll': 2, 'viewport': 2,
     'device': 1, 'fetch': 1,
-    'wait': 1, 'wait-for': 1,
+    'wait-for': 1,
     'eval': 1, 'eval-to': 2, 'eval-file': 1, 'eval-file-to': 2,
     'assert': 1, 'log': 1, 'capture': 1,
 }
