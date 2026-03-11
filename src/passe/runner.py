@@ -205,7 +205,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                                   'element_count': element_count})
                 else:
                     step_info['result'] = text[:200]
-            elif verb == 'read':
+            elif verb in ('read', 'extract'):
                 read_args = list(args)
                 force_source = None
                 no_wait = '--no-wait' in read_args
@@ -226,13 +226,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['auto_wait_ms'] = wait_ms
                     if not stable:
                         step_info['auto_wait_timed_out'] = True
-                    print(f'[read] auto-wait: {wait_ms}ms', file=sys.stderr)
+                    print(f'[{verb}] auto-wait: {wait_ms}ms', file=sys.stderr)
                 path = read_args[0] if read_args else None
                 read_result = await do_read(client, path, force_source=force_source)
                 md = read_result.get('markdown', '')
                 word_count = len(md.split()) if md else 0
                 if path:
-                    file_entry = {'path': path, 'verb': 'read',
+                    file_entry = {'path': path, 'verb': verb,
                                   'source': read_result.get('source'),
                                   'word_count': word_count}
                     if read_result.get('content_type'):

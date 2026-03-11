@@ -44,8 +44,8 @@ These are the most frequent errors from real passe usage across ~455 invocations
 | Mistake | Why it's wrong | Do this instead |
 |---------|---------------|-----------------|
 | `passe eval "document.title"` after `passe run` | `run` creates a tab and **closes it on success** (on failure it's kept for 30s). `eval` attaches to the first *existing* tab — which is whatever Sameer has open, not your page. | Put all verbs in one `passe run` script. Use `eval` inside the script, or use `--keep-tab` / `--flash` if you need the tab to survive. |
-| `goto URL; wait 1; read` | `read` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; read` or just `fetch URL` (one verb). |
-| `goto URL; read /tmp/out.md` instead of `fetch` | The `fetch` verb does goto + auto-wait + read in one step and is the ergonomic default. | `passe run -c 'fetch URL /tmp/out.md'` or `passe fetch URL` (top-level subcommand). |
+| `goto URL; wait 1; extract` | `extract` **auto-waits** after navigation verbs. The explicit `wait` is wasted time. | `goto URL; extract` or just `fetch URL` (one verb). |
+| `goto URL; extract /tmp/out.md` instead of `fetch` | The `fetch` verb does goto + auto-wait + extract in one step and is the ergonomic default. | `passe run -c 'fetch URL /tmp/out.md'` or `passe fetch URL` (top-level subcommand). |
 | Using passe for Google Drive/Gmail content | Passe opens a browser tab. Workspace content needs API access. | Use `mise fetch` for Drive docs, Gmail, Sheets. |
 | `passe run -c 'goto URL; click sel; type sel text; wait 0.5; screenshot /tmp/out.png; read /tmp/content.md'` | Monster inline one-liners are unreadable and error-prone. The CLI warns at >4 verbs or >200 chars. | Use heredoc for 5+ verbs. |
 | Chasing "doubled output" from passe | This is a Claude Code Bash tool quirk — non-zero exit codes replay output. Not a passe bug. | Check the exit code. If passe failed, read the error. Don't debug the duplication. |
@@ -54,7 +54,7 @@ These are the most frequent errors from real passe usage across ~455 invocations
 ## DO NOT
 
 1. **DO NOT run `passe eval` or `passe screenshot` expecting to see your `passe run` page.** The tab is gone. Put everything in one script.
-2. **DO NOT add `wait` before `read` after a `goto`.** Auto-wait handles this. Use `fetch` for the common case.
+2. **DO NOT add `wait` before `extract` after a `goto`.** Auto-wait handles this. Use `fetch` for the common case.
 3. **DO NOT use passe for Google Workspace content.** Use `mise fetch` for Drive, Gmail, Sheets.
 
 ## Tab lifecycle (30 words)
@@ -123,7 +123,7 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 **Observation:**
 - `screenshot [--fast] [--no-fast] [--format png|jpeg|webp] [--quality 0-100] [--viewport] [path]` — full-page PNG by default (capped at 16384px). `--viewport` for viewport-only. **`--fast`** shorthand: JPEG q70 + `optimizeForSpeed` + viewport-only — 2-4x faster, 3-6x smaller. Use for inner-loop iteration. **`PASSE_SCREENSHOT_FAST` env var** defaults all screenshots to `--fast`; override with `--no-fast` when you need full-page PNG fidelity. Returns timing breakdown in step NDJSON (`capture_ms`, `decode_ms`, `write_ms`, `bytes`).
 - `snapshot [path]` — list interactive elements with CSS selectors. For discovery.
-- `read [--source extractor] [--no-wait] [path]` — extract page content. **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). **Apple docs** (`developer.apple.com/documentation/*`) auto-detected → structured JSON endpoint (`source: apple-json`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
+- `extract [--source extractor] [--no-wait] [path]` — extract page content as markdown. (`read` still works as alias.) **Content-type sniffing**: JSON/XML/CSV/plain text pages bypass extraction and return raw content (JSON pretty-printed, `source: raw`). **Apple docs** (`developer.apple.com/documentation/*`) auto-detected → structured JSON endpoint (`source: apple-json`). HTML pages use cascade: trafilatura → Readability.js+Turndown → innerText. **Thin-read diagnostics**: if extraction is <200 chars, emits `thin_read` in step NDJSON with `possible_cause` (auth_wall/js_hydration/empty_page/unknown) and page metadata. Use `--source raw|trafilatura|readability|innertext` to force. **Auto-waits** after navigation verbs. Use `--no-wait` to skip.
 - `eval <expression>` — run JS, result in NDJSON step
 - `eval-to <path> <expression>` — run JS, write result to file
 - `eval-file <js-path>` — read JS from a file and evaluate. **Use for multi-line JS** — avoids the minify-to-one-line dance.
@@ -153,25 +153,25 @@ Never generate long inline one-liners. Use heredoc for 5+ verbs.
 
 `files` entries are objects with `path`, `verb`, and verb-specific metadata — read the summary to decide which files to open.
 
-## Content extraction: `read` vs `eval`
+## Content extraction: `extract` vs `eval`
 
-`read` uses a three-stage cascade: trafilatura (Python-side, handles most page types) → Readability.js+Turndown (browser-side fallback) → innerText. Shadow DOM content is flattened before extraction, so web components (MDN code examples, etc.) are visible to both extractors. The `source` field in step output tells you which extractor was used.
+`extract` uses a three-stage cascade: trafilatura (Python-side, handles most page types) → Readability.js+Turndown (browser-side fallback) → innerText. Shadow DOM content is flattened before extraction, so web components (MDN code examples, etc.) are visible to both extractors. The `source` field in step output tells you which extractor was used. (`read` still works as an alias.)
 
 **Known weaknesses:**
 
-| Page type | `read` produces | Fix |
+| Page type | `extract` produces | Fix |
 |-----------|----------------|-----|
 | **Cookie banner visible** | Just the banner text | Dismiss banner first (scout → click) |
 | **Animated/dynamic content** | Massive garbage | Use `eval` with `innerText` |
 | **Large data tables** | Quality gate auto-detects loss, falls to Readability | Rarely needed now; `eval` as escape hatch |
-| **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `read` |
+| **Slow-hydrating SPAs** | Incomplete content | Add adequate `wait` before `extract` |
 | **JSON/XML/structured data** | Raw passthrough (auto-detected) | Content-type sniffing handles this automatically (`source: raw`) |
 
 **Decision tree:**
 
-1. **Any page with text content?** → try `read` first (trafilatura handles articles, dashboards, SPAs)
-2. **`read` output missing content?** → check `source` field; try `eval` with selector chain
-3. **Cookie banner present?** → scout + dismiss first, then `read`
+1. **Any page with text content?** → try `extract` first (trafilatura handles articles, dashboards, SPAs)
+2. **`extract` output missing content?** → check `source` field; try `eval` with selector chain
+3. **Cookie banner present?** → scout + dismiss first, then `extract`
 4. **Huge or garbled output?** → page has animations or dynamic content; switch to `eval`
 
 **The `eval` fallback pattern** — chain selectors with `||` for resilience:
@@ -344,7 +344,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 - **DOM mutation during TreeWalker traversal**: If you use `eval` to walk the DOM with `createTreeWalker` and mutate nodes (e.g. `replaceChild`), the walker loses its position and silently stops. **Collect nodes first into an array, then mutate in a second pass.**
 - **Minifying JS for `eval`**: Don't. Use `eval-file` instead.
 - **`eval-file-to` arg order**: It's `eval-file-to <out-path> <js-path>` — output first, source second. Matches `eval-to` convention but opposite to Unix (source → dest). Double-check.
-- **Arbitrary `wait` durations**: Don't guess (`wait 2`). `read` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + read in one step). After clicks that trigger SPA route changes or XHR calls, use bare `wait` (network idle) or `wait .selector` for a specific element. Bare `wait` is the better default — it's deterministic and replaces guessed delays.
+- **Arbitrary `wait` durations**: Don't guess (`wait 2`). `extract` auto-waits for DOM stability after navigation verbs — no explicit wait needed. Use `fetch URL /tmp/out.md` for the common case (goto + auto-wait + extract in one step). After clicks that trigger SPA route changes or XHR calls, use bare `wait` (network idle) or `wait .selector` for a specific element. Bare `wait` is the better default — it's deterministic and replaces guessed delays.
 - **PNG for inner-loop iteration**: Use `screenshot --fast` for edit-and-see loops. PNG at 3x DPR produces 1179×2556 images (expensive in tokens). `--fast` gives JPEG viewport-only at the preset DPR (or `--dpr 1` for even smaller). Save PNG for final fidelity checks.
 
 ## Subcommands (no DSL needed)

@@ -9,7 +9,7 @@ CONTENT_INLINE_THRESHOLD = 2000
 
 KNOWN_VERBS = {
     'goto', 'click', 'click-text', 'fill', 'type', 'select',
-    'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'fetch',
+    'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'extract', 'fetch',
     'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log', 'bring-to-front',
@@ -39,9 +39,8 @@ VERB_SUGGESTIONS = {
     'shoot': ('screenshot', None),
     'snap': ('screenshot', None),
     'print': ('screenshot', None),
-    'extract': ('read', None),
-    'scrape': ('read', None),
-    'get': ('read', 'use "goto" to navigate or "read" to extract content'),
+    'scrape': ('extract', None),
+    'get': ('extract', 'use "goto" to navigate or "extract" to extract content'),
     'scroll-down': ('scroll', 'scroll uses coordinates: scroll 0 500'),
     'scroll-up': ('scroll', 'scroll uses coordinates: scroll 0 -500'),
     'scroll-left': ('scroll', 'scroll uses coordinates: scroll -500 0'),
