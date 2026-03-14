@@ -1,0 +1,39 @@
+# Bench corpus URLs — category followed by URL
+# Run: uv run --script tests/bench/snapshot.py --from-list tests/bench/urls.txt
+
+# --- Articles (vanilla extraction, should be easy) ---
+article https://simonwillison.net/2025/Jan/15/building-on-llms/
+article https://www.bbc.co.uk/news/technology-67988517
+article https://arstechnica.com/science/2025/01/the-best-science-books-of-2024/
+article https://www.theguardian.com/technology/2025/jan/10/ai-artificial-intelligence
+article https://blog.codinghorror.com/the-magpie-developer/
+
+# --- Documentation sites (structure preservation, nav stripping) ---
+docs https://docs.python.org/3/library/json.html
+docs https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise
+docs https://go.dev/doc/effective_go
+docs https://docs.rs/serde/latest/serde/
+docs https://htmx.org/docs/
+
+# --- Code-heavy (code block preservation, language hints) ---
+code-heavy https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array
+code-heavy https://github.com/simonw/datasette/blob/main/README.md
+code-heavy https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html
+code-heavy https://fastapi.tiangolo.com/tutorial/first-steps/
+
+# --- Table-heavy (table integrity) ---
+table-heavy https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)
+table-heavy https://caniuse.com/css-grid
+table-heavy https://en.wikipedia.org/wiki/Comparison_of_programming_languages_(basic_instructions)
+
+# --- SPA (JS-rendered, empty shells via HTTP) ---
+spa https://react.dev/reference/react/useState
+spa https://svelte.dev/docs/introduction
+
+# --- Next.js (test __NEXT_DATA__ extraction) ---
+nextjs https://vercel.com/blog
+nextjs https://nextjs.org/docs/getting-started/installation
+
+# --- Complex (heavy layouts, web components, shadow DOM) ---
+complex https://developer.apple.com/documentation/swift/array
+complex https://web.dev/articles/web-components

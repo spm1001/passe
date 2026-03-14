@@ -1,0 +1,26 @@
+{
+  "url": "https://docs.rs/serde/latest/serde/",
+  "category": "docs",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 24865,
+  "ground_truth_words": 547,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 655.6,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://docs.rs/serde/latest/serde/",
+    "files": [
+      {
+        "path": "/tmp/bench-u66w0fij.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 547
+      }
+    ]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "url": "https://fastapi.tiangolo.com/tutorial/first-steps/",
+  "category": "code-heavy",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 154470,
+  "ground_truth_words": 1494,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 3267.0,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://fastapi.tiangolo.com/tutorial/first-steps/",
+    "files": [
+      {
+        "path": "/tmp/bench-n_hfsl72.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 1494
+      }
+    ]
+  }
+}

@@ -27,6 +27,16 @@ The 100x speed gap isn't the browser — it's the protocol. MCP needs a model ro
 
 Passe is for **fast, scriptable, single-connection browser automation from the CLI**. The `extract` verb pulls clean markdown from any page type — it gets the rendered HTML from Chrome, runs trafilatura Python-side for extraction, and falls back to Readability.js+Turndown if trafilatura can't handle it. (`read` still works as an alias.) Use `mise fetch` for Google Workspace content (Drive, Gmail).
 
+### HTTP fast-path (passe fetch only)
+
+`passe fetch` tries an HTTP-first approach before connecting to Chrome. For ~87% of pages (articles, docs, static sites), this returns clean markdown in 300-1500ms without touching Chrome at all. The fast-path:
+
+1. **Framework shortcuts**: Apple Developer docs (JSON API), Next.js `__NEXT_DATA__` (pre-rendered JSON)
+2. **HTTP + trafilatura**: httpx GET → trafilatura extraction → composite quality gate
+3. **Quality gate**: word count, stop words ratio, link density, text-to-HTML ratio, table/code preservation, paywall/CAPTCHA detection. Below threshold → falls through to Chrome silently.
+
+When the fast-path succeeds, the summary JSON includes `"fast_path": true`. When it fails, Chrome takes over transparently — the caller sees the same output format either way. The `extract` verb inside `passe run` scripts always uses Chrome (no fast-path) since the script may need interaction before extraction.
+
 ## The Chrome connection model
 
 **This is the single most important thing to understand.**
@@ -154,7 +164,7 @@ passe run tests/checkout-flow.passe
 
 - **stderr**: NDJSON per step — `{"i":0,"verb":"goto","ms":342,"url":"https://example.com/","status_code":200}`
 - **stdout**: summary — `{"ok":true,"steps":6,"total_ms":443,"files":[{"path":"/tmp/out.png","verb":"screenshot","format":"png","kb":234.5}],"final_url":"https://example.com/"}`
-- **Exit code**: 0 success, 1 failure
+- **Exit code**: 0 success, 1 thin/degraded extraction (content returned but quality is low), 2 tool failure (Chrome down, network error, bad args). For `passe fetch`, exit 1 means the content was extracted but may be incomplete — the agent should assess whether it's usable. Scripts (`passe run`) still use 0/1.
 
 `files` entries are objects with `path`, `verb`, and verb-specific metadata (screenshot: `format`/`kb`; read/fetch: `source`/`word_count`/`content_type`; snapshot: `element_count`; eval-to: `byte_size`; capture: `requests`/`by_type`/`domains`/`errors`). Read the summary to decide which files to open.
 

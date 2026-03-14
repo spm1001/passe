@@ -1,0 +1,26 @@
+{
+  "url": "https://martinfowler.com/articles/microservices.html",
+  "category": "article",
+  "tags": [],
+  "snapshot_date": "2026-03-14",
+  "http_status": 200,
+  "html_bytes": 86040,
+  "ground_truth_words": 6426,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 1918.4,
+    "cdp": "http://100.66.153.39:9222",
+    "browser": "Chrome/146.0.7680.80",
+    "final_url": "https://martinfowler.com/articles/microservices.html",
+    "files": [
+      {
+        "path": "/tmp/bench-hov1fr3a.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 6426
+      }
+    ]
+  }
+}

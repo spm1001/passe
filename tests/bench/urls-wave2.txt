@@ -1,0 +1,40 @@
+# Wave 2: hostile sites, paywalls, cookie walls, more variety
+# Snapshot with: uv run --script tests/bench/snapshot.py --from-list tests/bench/urls-wave2.txt
+
+# --- Substack (hostile to bots, metered, newsletter platform) ---
+article https://www.platformer.news/meta-hateful-conduct-policy-lgbtq/
+article https://simonwillison.substack.com/p/weeknotes-llm-08
+article https://newsletter.pragmaticengineer.com/p/what-is-old-is-new-again
+
+# --- Medium (metered paywall, React SPA) ---
+paywall https://medium.com/@nikitonsky/medium-is-a-poor-choice-for-blogging-bb0048d19571
+paywall https://towardsdatascience.com/understanding-lstm-networks-a-detailed-guide-with-code-examples-3606df29d7e2
+
+# --- More articles (variety of CMSes and layouts) ---
+article https://www.joelonsoftware.com/2000/04/06/things-you-should-never-do-part-i/
+article https://danluu.com/simple-hierarchical/
+article https://paulgraham.com/superlinear.html
+article https://martinfowler.com/articles/microservices.html
+article https://brooker.co.za/blog/2025/02/27/methodology.html
+
+# --- More docs (different structures) ---
+docs https://tailwindcss.com/docs/installation
+docs https://jqlang.org/manual/
+docs https://flask.palletsprojects.com/en/stable/quickstart/
+
+# --- More code-heavy ---
+code-heavy https://github.com/anthropics/anthropic-cookbook/blob/main/misc/prompt_caching.ipynb
+code-heavy https://github.com/pydantic/pydantic/blob/main/README.md
+
+# --- Complex/hostile ---
+complex https://www.nytimes.com/2025/01/15/technology/ai-agents.html
+complex https://www.linkedin.com/pulse/some-article
+complex https://twitter.com/simonw
+
+# --- Cookie consent heavy (EU sites) ---
+article https://www.spiegel.de/international/germany/germany-s-political-chaos-what-is-going-on-a-86c9b1cc-5579-46ef-89c0-3d8fc6e41bca
+article https://www.lemonde.fr/en/international/
+
+# --- Minimal/clean blogs (should be easy wins) ---
+article https://rachelbythebay.com/w/2024/11/01/cf/
+article https://blog.jim-nielsen.com/2024/sanding-ui/

@@ -1,0 +1,26 @@
+{
+  "url": "https://web.dev/articles/web-components",
+  "category": "complex",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 80519,
+  "ground_truth_words": 259,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 1579.3,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://web.dev/articles/web-components",
+    "files": [
+      {
+        "path": "/tmp/bench-86xc10es.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 259
+      }
+    ]
+  }
+}

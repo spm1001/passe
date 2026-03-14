@@ -1,0 +1,26 @@
+{
+  "url": "https://caniuse.com/css-grid",
+  "category": "table-heavy",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 34208,
+  "ground_truth_words": 421,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 3318.8,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://caniuse.com/css-grid",
+    "files": [
+      {
+        "path": "/tmp/bench-fccvu69s.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 421
+      }
+    ]
+  }
+}

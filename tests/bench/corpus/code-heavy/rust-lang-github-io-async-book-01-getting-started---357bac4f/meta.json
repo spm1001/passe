@@ -1,0 +1,26 @@
+{
+  "url": "https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html",
+  "category": "code-heavy",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 18621,
+  "ground_truth_words": 959,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 1567.3,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://rust-lang.github.io/async-book/01_getting_started/02_why_async.html",
+    "files": [
+      {
+        "path": "/tmp/bench-ewg0i65a.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 959
+      }
+    ]
+  }
+}
