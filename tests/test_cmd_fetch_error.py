@@ -34,6 +34,7 @@ async def test_fetch_error_emits_json():
     client = _make_client()
 
     with patch('passe.commands.connect', _mock_connect(client)), \
+         patch('passe.fastpath.try_http_fetch', return_value=None), \
          patch('passe.verbs.do_fetch',
                AsyncMock(side_effect=RuntimeError('Navigation timeout'))), \
          patch('sys.stdout', new_callable=StringIO) as out, \
@@ -41,7 +42,7 @@ async def test_fetch_error_emits_json():
          pytest.raises(SystemExit) as exc_info:
         await cmd_fetch('https://broken.example.com')
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == 2  # tool failure (not thin extraction)
     result = json.loads(out.getvalue())
     assert result['ok'] is False
     assert result['verb'] == 'fetch'
@@ -56,6 +57,7 @@ async def test_fetch_error_summary_on_stderr():
     client = _make_client()
 
     with patch('passe.commands.connect', _mock_connect(client)), \
+         patch('passe.fastpath.try_http_fetch', return_value=None), \
          patch('passe.verbs.do_fetch',
                AsyncMock(side_effect=ValueError('bad selector'))), \
          patch('sys.stdout', new_callable=StringIO), \
@@ -77,6 +79,7 @@ async def test_fetch_success_unchanged():
     }
 
     with patch('passe.commands.connect', _mock_connect(client)), \
+         patch('passe.fastpath.try_http_fetch', return_value=None), \
          patch('passe.verbs.do_fetch',
                AsyncMock(return_value=fetch_result)), \
          patch('sys.stdout', new_callable=StringIO) as out, \
