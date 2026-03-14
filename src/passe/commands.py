@@ -298,7 +298,9 @@ async def cmd_fetch(url: str, path: str = None,
                 summary['files'] = [file_entry]
 
             # Exit code 1 for thin/degraded extraction
-            thin = result.get('thin_read') or (word_count < 50 and word_count > 0)
+            # Only flag thin_read from the extraction cascade — don't second-guess
+            # based on word count alone (short pages are legitimate)
+            thin = bool(result.get('thin_read'))
             if thin:
                 summary['thin'] = True
 

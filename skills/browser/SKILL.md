@@ -8,8 +8,8 @@ description: >
   'fill a form on', 'scrape this page', 'capture network requests',
   'what API calls does this page make', 'reverse-engineer API',
   'look at this page', 'check if this page has', 'verify deployment'.
-  For clean article/blog extraction use mise fetch; for DOM-faithful extraction
-  (tables, code blocks, technical docs) use passe extract. (user)
+  For web content extraction (articles, docs, SPAs) use passe fetch (HTTP fast-path
+  + Chrome escalation); for DOM-faithful extraction use passe extract. (user)
 requires:
   - cli: passe
     check: "passe --version"
