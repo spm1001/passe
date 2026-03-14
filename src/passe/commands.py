@@ -221,6 +221,39 @@ async def cmd_fetch(url: str, path: str = None,
 
     explicit_path = path is not None
 
+    # --- HTTP fast-path: try before Chrome ---
+    # Skip if: device emulation needed, or source forces browser-side extraction
+    if not device and source not in ('readability', 'innertext'):
+        from passe.fastpath import try_http_fetch
+        fp_result = try_http_fetch(url, force_source=source)
+        if fp_result and fp_result.quality_score >= 0.35 and not fp_result.escalate_reason:
+            word_count, resolved_path = resolve_fetch_output(
+                fp_result.markdown, path if explicit_path else None)
+            summary = {
+                'ok': True, 'steps': 1,
+                'total_ms': fp_result.fetch_ms,
+                'final_url': fp_result.url,
+                'fast_path': True,
+            }
+            if resolved_path is None:
+                summary['content'] = fp_result.markdown
+                summary['word_count'] = word_count
+                summary['source'] = fp_result.source
+                if fp_result.content_type:
+                    summary['content_type'] = fp_result.content_type
+            else:
+                file_entry = {
+                    'path': resolved_path, 'verb': 'fetch',
+                    'source': fp_result.source,
+                    'word_count': word_count,
+                }
+                if fp_result.content_type:
+                    file_entry['content_type'] = fp_result.content_type
+                summary['files'] = [file_entry]
+            _emit_summary(summary)
+            print(json.dumps(summary))
+            return
+
     async with connect() as (client, conn_info):
         await client.create_tab()
         await client.send('Page.enable')
@@ -264,8 +297,16 @@ async def cmd_fetch(url: str, path: str = None,
                     file_entry['content_type'] = result['content_type']
                 summary['files'] = [file_entry]
 
+            # Exit code 1 for thin/degraded extraction
+            thin = result.get('thin_read') or (word_count < 50 and word_count > 0)
+            if thin:
+                summary['thin'] = True
+
             _emit_summary(summary)
             print(json.dumps(summary))
+
+            if thin:
+                sys.exit(1)
         except Exception as exc:
             ms = round((time.monotonic() - t0) * 1000, 1)
             summary = {
@@ -276,7 +317,7 @@ async def cmd_fetch(url: str, path: str = None,
             }
             _emit_summary(summary)
             print(json.dumps(summary))
-            sys.exit(1)
+            sys.exit(2)  # tool failure
         finally:
             await client.close_tab()
 

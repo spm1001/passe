@@ -1,0 +1,26 @@
+{
+  "url": "https://www.linkedin.com/pulse/some-article",
+  "category": "complex",
+  "tags": [],
+  "snapshot_date": "2026-03-14",
+  "http_status": 200,
+  "html_bytes": 98485,
+  "ground_truth_words": 563,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 2248.4,
+    "cdp": "http://100.66.153.39:9222",
+    "browser": "Chrome/146.0.7680.80",
+    "final_url": "https://www.linkedin.com/pulse/some-article/",
+    "files": [
+      {
+        "path": "/tmp/bench-t4qd_e1g.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 563
+      }
+    ]
+  }
+}

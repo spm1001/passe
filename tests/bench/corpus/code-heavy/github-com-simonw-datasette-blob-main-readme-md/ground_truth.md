@@ -1,0 +1,102 @@
+*An open source multi-tool for exploring and publishing data*
+
+Datasette is a tool for exploring and publishing data. It helps people take data of any shape or size and publish that as an interactive, explorable website and accompanying API.
+
+Datasette is aimed at data journalists, museum curators, archivists, local governments, scientists, researchers and anyone else who has data that they wish to share with the world.
+
+[Explore a demo](https://datasette.io/global-power-plants/global-power-plants), watch [a video about the project](https://simonwillison.net/2021/Feb/7/video/) or try it out [on GitHub Codespaces](https://github.com/datasette/datasette-studio).
+
+[datasette.io](https://datasette.io/)is the official project website- Latest
+[Datasette News](https://datasette.io/news) - Comprehensive documentation:
+[https://docs.datasette.io/](https://docs.datasette.io/) - Examples:
+[https://datasette.io/examples](https://datasette.io/examples) - Live demo of current
+`main`
+
+branch:[https://latest.datasette.io/](https://latest.datasette.io/) - Questions, feedback or want to talk about the project? Join our
+[Discord](https://datasette.io/discord)
+
+Want to stay up-to-date with the project? Subscribe to the [Datasette newsletter](https://datasette.substack.com/) for tips, tricks and news on what's new in the Datasette ecosystem.
+
+If you are on a Mac, [Homebrew](https://brew.sh/) is the easiest way to install Datasette:
+
+```
+brew install datasette
+```
+
+
+You can also install it using `pip`
+
+or `pipx`
+
+:
+
+```
+pip install datasette
+```
+
+
+Datasette requires Python 3.8 or higher. We also have [detailed installation instructions](https://docs.datasette.io/en/stable/installation.html) covering other options such as Docker.
+
+```
+datasette serve path/to/database.db
+```
+
+
+This will start a web server on port 8001 - visit [http://localhost:8001/](http://localhost:8001/) to access the web interface.
+
+`serve`
+
+is the default subcommand, you can omit it if you like.
+
+Use Chrome on OS X? You can run datasette against your browser history like so:
+
+```
+datasette ~/Library/Application\ Support/Google/Chrome/Default/History --nolock
+```
+
+
+Now visiting [http://localhost:8001/History/downloads](http://localhost:8001/History/downloads) will show you a web interface to browse your downloads data:
+
+If you want to include licensing and source information in the generated datasette website you can do so using a JSON file that looks something like this:
+
+```
+{
+"title": "Five Thirty Eight",
+"license": "CC Attribution 4.0 License",
+"license_url": "http://creativecommons.org/licenses/by/4.0/",
+"source": "fivethirtyeight/data on GitHub",
+"source_url": "https://github.com/fivethirtyeight/data"
+}
+```
+
+
+Save this in `metadata.json`
+
+and run Datasette like so:
+
+```
+datasette serve fivethirtyeight.db -m metadata.json
+```
+
+
+The license and source information will be displayed on the index page and in the footer. They will also be included in the JSON produced by the API.
+
+If you have [Heroku](https://heroku.com/) or [Google Cloud Run](https://cloud.google.com/run/) configured, Datasette can deploy one or more SQLite databases to the internet with a single command:
+
+```
+datasette publish heroku database.db
+```
+
+
+Or:
+
+```
+datasette publish cloudrun database.db
+```
+
+
+This will create a docker image containing both the datasette application and the specified SQLite database files. It will then deploy that image to Heroku or Cloud Run and give you a URL to access the resulting website and API.
+
+See [Publishing data](https://docs.datasette.io/en/stable/publish.html) in the documentation for more details.
+
+[Datasette Lite](https://lite.datasette.io/) is Datasette packaged using WebAssembly so that it runs entirely in your browser, no Python web application server required. Read more about that in the [Datasette Lite documentation](https://github.com/simonw/datasette-lite/blob/main/README.md).

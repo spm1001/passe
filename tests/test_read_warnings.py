@@ -38,6 +38,7 @@ def _make_client(*values, content_type='text/html', url='https://example.com'):
     client.send = AsyncMock(side_effect=[
         {'result': {'result': {'value': v}}} for v in all_values
     ])
+    client._network_requests = {}
     return client
 
 
@@ -754,6 +755,7 @@ def _make_raw_client(content_type, body_text):
         {'result': {'result': {'value': content_type}}},
         {'result': {'result': {'value': body_text}}},
     ])
+    client._network_requests = {}
     return client
 
 
@@ -816,6 +818,7 @@ async def test_content_type_with_charset_still_matches():
         {'result': {'result': {'value': 'application/json; charset=utf-8'}}},
         {'result': {'result': {'value': '{"ok": true}'}}},
     ])
+    client._network_requests = {}
     result = await do_read(client)
 
     assert result['source'] == 'raw'
@@ -911,6 +914,7 @@ def _make_thin_client(html, meta_dict, *extra_values, content_type='text/html',
     client.send = AsyncMock(side_effect=[
         {'result': {'result': {'value': v}}} for v in all_values
     ])
+    client._network_requests = {}
     return client
 
 

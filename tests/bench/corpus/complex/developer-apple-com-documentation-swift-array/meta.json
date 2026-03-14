@@ -1,0 +1,26 @@
+{
+  "url": "https://developer.apple.com/documentation/swift/array",
+  "category": "complex",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 3174,
+  "ground_truth_words": 4164,
+  "ground_truth_source": "apple-json",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 3489.1,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://developer.apple.com/documentation/swift/array",
+    "files": [
+      {
+        "path": "/tmp/bench-e71_hcbj.md",
+        "verb": "fetch",
+        "source": "apple-json",
+        "word_count": 4164
+      }
+    ]
+  }
+}

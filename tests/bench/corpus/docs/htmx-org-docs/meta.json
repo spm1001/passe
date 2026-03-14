@@ -1,0 +1,26 @@
+{
+  "url": "https://htmx.org/docs/",
+  "category": "docs",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 167990,
+  "ground_truth_words": 9880,
+  "ground_truth_source": "trafilatura",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 5294.9,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://htmx.org/docs/",
+    "files": [
+      {
+        "path": "/tmp/bench-nap7x2se.md",
+        "verb": "fetch",
+        "source": "trafilatura",
+        "word_count": 9880
+      }
+    ]
+  }
+}

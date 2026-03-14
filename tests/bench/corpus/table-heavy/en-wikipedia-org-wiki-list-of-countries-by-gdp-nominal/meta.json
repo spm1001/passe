@@ -1,0 +1,26 @@
+{
+  "url": "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)",
+  "category": "table-heavy",
+  "tags": [],
+  "snapshot_date": "2026-03-13",
+  "http_status": 200,
+  "html_bytes": 420731,
+  "ground_truth_words": 3411,
+  "ground_truth_source": "readability",
+  "chrome_summary": {
+    "ok": true,
+    "steps": 1,
+    "total_ms": 3306.9,
+    "cdp": "http://localhost:9222",
+    "browser": "Chrome/145.0.7632.159",
+    "final_url": "https://en.wikipedia.org/wiki/List_of_countries_by_GDP_(nominal)",
+    "files": [
+      {
+        "path": "/tmp/bench-hnkmz6rn.md",
+        "verb": "fetch",
+        "source": "readability",
+        "word_count": 3411
+      }
+    ]
+  }
+}
