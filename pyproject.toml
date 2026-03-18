@@ -1,6 +1,6 @@
 [project]
 name = "passe"
-version = "0.1.0"
+version = "0.3.0"
 description = "Fast CDP browser automation — the kitchen pass for Chrome"
 requires-python = ">=3.11"
 dependencies = [
