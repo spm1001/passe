@@ -3,3 +3,4 @@ package-lock.json
 chrome-passe/chrome-passe
 chrome-passe/chrome-passe-arm64
 chrome-passe/chrome-passe-x86_64
+.env

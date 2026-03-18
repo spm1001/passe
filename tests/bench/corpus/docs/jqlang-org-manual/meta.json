@@ -11,7 +11,7 @@
     "ok": true,
     "steps": 1,
     "total_ms": 1935.8,
-    "cdp": "http://100.66.153.39:9222",
+    "cdp": "http://localhost:9222",
     "browser": "Chrome/146.0.7680.80",
     "final_url": "https://jqlang.org/manual/",
     "files": [
