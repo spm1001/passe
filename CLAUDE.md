@@ -67,7 +67,7 @@ Chrome Passe on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--re
 | Where | What |
 |-------|------|
 | **Mac** | `tailscale serve --bg --tcp 9222 tcp://localhost:9222` (persistent, survives reboots) |
-| **Kube** | `PASSE_CDP=http://100.66.153.39:9222` in `.bashrc` |
+| **Kube** | `PASSE_CDP=http://$KUBE_TAILSCALE_IP:9222` in `.bashrc` |
 | **Passe** | WebSocket URL rewriting in `connect()` — rewrites `ws://localhost:...` to use the Tailscale IP |
 
 **Verify:** `curl -s $PASSE_CDP/json/version` should return Chrome's version JSON.
