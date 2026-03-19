@@ -1,6 +1,6 @@
 [project]
 name = "passe"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Fast CDP browser automation — the kitchen pass for Chrome"
 requires-python = ">=3.11"
 dependencies = [
@@ -22,6 +22,10 @@ asyncio_mode = "auto"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = ".claude-plugin/plugin.json"
+pattern = "\"version\":\\s*\"(?P<version>[^\"]+)\""
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/passe"]
