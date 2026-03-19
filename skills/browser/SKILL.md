@@ -1,5 +1,6 @@
 ---
 name: passe
+allowed-tools: ["Bash(passe:*)", Read]
 description: >
   Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE any
   `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
