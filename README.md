@@ -33,7 +33,7 @@ There are dozens of browser automation tools now. This 2×2 captures where they 
 
 **Top-left** is passe. Same authenticated session access as the top-right tools, but the AI thinks once and the script runs at wire speed. This quadrant is empty except for passe.
 
-See [LANDSCAPE.md](LANDSCAPE.md) for the full competitive analysis with hard numbers.
+See [docs/landscape.md](docs/landscape.md) for the full competitive analysis with hard numbers.
 
 ## The numbers
 
