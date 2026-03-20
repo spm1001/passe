@@ -18,6 +18,7 @@ import sys
 from passe.connection import set_cdp_override
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices)
+from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
 
 # ── Re-exports for backward compatibility ─────────────────
 # Tests and external code import these from passe.cli.
@@ -72,6 +73,10 @@ Commands:
   passe eval <expression>         Eval JS on current page
   passe explain -c 'verbs...'     Dry-run: validate script without executing
   passe devices                   List available device presets
+  passe log tail [-n N]           Recent network requests (newest first)
+  passe log list [--filter P]     Filtered request list
+  passe log show ID               Full request detail
+  passe log clear [--older 7d]    Clear log entries
 
 Global flags:
   --cdp <url>       CDP endpoint (default: PASSE_CDP env or http://localhost:9222)
@@ -322,6 +327,27 @@ def main():
         _run(cmd_eval(' '.join(all_args[1:])))
     elif cmd == 'devices':
         cmd_devices()
+    elif cmd == 'log':
+        log_args = all_args[1:]
+        if not log_args:
+            print('Usage: passe log tail|list|show|clear [flags]',
+                  file=sys.stderr)
+            sys.exit(1)
+        subcmd = log_args[0]
+        sub_args = log_args[1:]
+        if subcmd == 'tail':
+            cmd_log_tail(sub_args)
+        elif subcmd == 'list':
+            cmd_log_list(sub_args)
+        elif subcmd == 'show':
+            cmd_log_show(sub_args)
+        elif subcmd == 'clear':
+            cmd_log_clear(sub_args)
+        else:
+            print(f'passe log: unknown subcommand {subcmd!r}. '
+                  f'Use tail, list, show, or clear.',
+                  file=sys.stderr)
+            sys.exit(1)
     else:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
