@@ -4,16 +4,10 @@ allowed-tools: ["Bash(passe:*)", Read]
 description: >
   Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE any
   `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
-  conventions that prevent malformed scripts and wasted round-trips. Triggers on
-  'passe run', 'automate the browser', 'screenshot a page', 'interact with a website',
-  'fill a form on', 'scrape this page', 'capture network requests',
-  'what API calls does this page make', 'reverse-engineer API',
-  'look at this page', 'check if this page has', 'verify deployment'.
-  For web content extraction (articles, docs, SPAs) use passe fetch (HTTP fast-path
-  + Chrome escalation); for DOM-faithful extraction use passe extract. (user)
-requires:
-  - cli: passe
-    check: "passe --version"
+  conventions that prevent malformed scripts. Triggers on 'passe run',
+  'automate the browser', 'screenshot a page', 'interact with a website',
+  'scrape this page', 'capture network requests', 'reverse-engineer API',
+  'fetch this page', 'check if this page has', 'verify deployment'. (user)
 ---
 
 # passe — fast CDP browser automation
