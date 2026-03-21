@@ -215,6 +215,7 @@ class LogDaemon:
         self._msg_id = 0
         self._pending: dict[int, asyncio.Future] = {}
         self._ws: websockets.WebSocketClientProtocol | None = None
+        self._receiver_task: asyncio.Task | None = None
 
     # -- CDP command/response plumbing ------------------------------------
 
@@ -434,6 +435,11 @@ class LogDaemon:
         log.info('Connecting to %s (%s)', info['cdp'], info['browser'])
 
         self._ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
+
+        # Start receiver BEFORE sending commands — send() needs it to
+        # dispatch CDP responses to pending futures.
+        self._receiver_task = asyncio.create_task(self._receive_messages())
+
         self.state = DaemonState.ATTACHING
 
         await self.send('Target.setAutoAttach', {
@@ -464,8 +470,8 @@ class LogDaemon:
         log.info('Capturing %d tabs', len(self.sessions))
         self.state = DaemonState.CAPTURING
 
-    async def _message_loop(self):
-        """Receive and dispatch messages until disconnected."""
+    async def _receive_messages(self):
+        """Background task: receive and dispatch messages until disconnected."""
         try:
             async for raw in self._ws:
                 self._dispatch(raw)
@@ -476,11 +482,19 @@ class LogDaemon:
         except Exception as exc:
             log.error('Receiver error: %s', exc)
 
+    async def _wait_for_disconnect(self):
+        """Wait for the receiver task to finish (disconnect or error)."""
+        if self._receiver_task:
+            await self._receiver_task
+
     def _reset_session_state(self):
         """Discard all per-connection state on disconnect."""
         self.sessions.clear()
         self.store.clear()
         self._pending.clear()
+        if self._receiver_task and not self._receiver_task.done():
+            self._receiver_task.cancel()
+        self._receiver_task = None
         self._ws = None
 
     # -- Reconnection state machine ----------------------------------------
@@ -497,7 +511,7 @@ class LogDaemon:
                 try:
                     await self._connect_and_attach()
                     backoff = BACKOFF_INITIAL       # reset on success
-                    await self._message_loop()
+                    await self._wait_for_disconnect()
                 except ConnectionError as exc:
                     log.error('Connection failed: %s', exc)
                 except Exception as exc:
