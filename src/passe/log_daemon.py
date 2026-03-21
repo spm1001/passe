@@ -58,6 +58,7 @@ SKIP_URL_PATTERNS = [
         r'/analytics', r'/tracking', r'/telemetry',
         r'/beacon', r'/pixel', r'/metrics',
         r'\.ads\.', r'adservice', r'adsystem',
+        r'^chrome-extension://',
     ]
 ]
 

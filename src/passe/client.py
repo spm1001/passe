@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 import time
+import urllib.request
 
 import websockets
 
@@ -214,10 +215,32 @@ class CDPClient:
             if self._inflight_count == 0:
                 self._network_idle_event.set()
 
+    async def _get_pages(self) -> list[dict]:
+        """Discover page targets via HTTP /json (primary) or CDP fallback.
+
+        Returns [{targetId, url, title, type}] — normalized so both paths
+        produce the same shape. HTTP /json always works on fresh connections;
+        CDP Target.getTargets requires setDiscoverTargets first.
+        """
+        try:
+            with urllib.request.urlopen(
+                    f'{self._cdp_http}/json', timeout=3) as resp:
+                targets = json.loads(resp.read())
+            return [
+                {'targetId': t['id'], 'url': t.get('url', ''),
+                 'title': t.get('title', ''), 'type': 'page'}
+                for t in targets if t.get('type') == 'page'
+            ]
+        except Exception:
+            result = await self.send('Target.getTargets')
+            return [
+                t for t in result.get('result', {}).get('targetInfos', [])
+                if t.get('type') == 'page'
+            ]
+
     async def attach_to_first_page(self) -> str:
         """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
-        result = await self.send('Target.getTargets')
-        pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
+        pages = await self._get_pages()
         if not pages:
             # Chrome running with zero tabs (only service workers) — create one
             created = await self.send('Target.createTarget', {
@@ -240,12 +263,12 @@ class CDPClient:
         already on that origin. Falls back to the first non-chrome:// tab.
         Always logs the attached tab's URL to stderr.
         """
-        result = await self.send('Target.getTargets')
-        pages = [t for t in result['result']['targetInfos']
-                 if t['type'] == 'page' and not t.get('url', '').startswith('chrome://')]
+        all_pages = await self._get_pages()
+        pages = [t for t in all_pages
+                 if not t.get('url', '').startswith('chrome://')]
         if not pages:
             # Fall back to any page tab
-            pages = [t for t in result['result']['targetInfos'] if t['type'] == 'page']
+            pages = all_pages
         if not pages:
             raise RuntimeError('No browser tab to reuse — open a tab first')
         # Prefer origin match when caller knows the target
@@ -271,12 +294,9 @@ class CDPClient:
         Returns the number of tabs closed. Used by --keep-tab auto-replace
         to prevent tab accumulation on repeated runs to the same site.
         """
-        result = await self.send('Target.getTargets')
-        targets = result.get('result', {}).get('targetInfos', [])
+        pages = await self._get_pages()
         closed = 0
-        for target in targets:
-            if target.get('type') != 'page':
-                continue
+        for target in pages:
             url = target.get('url', '')
             if not url.startswith(origin):
                 continue
@@ -291,11 +311,10 @@ class CDPClient:
 
     async def list_tabs(self) -> list[dict]:
         """List all page tabs. Returns [{target_id, url, title}]."""
-        result = await self.send('Target.getTargets')
-        targets = result.get('result', {}).get('targetInfos', [])
+        pages = await self._get_pages()
         return [
             {'target_id': t['targetId'], 'url': t.get('url', ''), 'title': t.get('title', '')}
-            for t in targets if t.get('type') == 'page'
+            for t in pages
         ]
 
     async def create_tab(self, foreground: bool = False) -> str:
@@ -331,24 +350,14 @@ class CDPClient:
         self._network_enabled = False
         if self._owns_tab and self._target_id:
             # Safety: don't leave Chrome windowless.
-            # Use /json HTTP endpoint — Target.getTargets needs discovery
-            # enabled and misses tabs on fresh connections.
             try:
-                import json as _json
-                import urllib.request
-                with urllib.request.urlopen(
-                        f'{self._cdp_http}/json', timeout=3) as resp:
-                    targets = _json.loads(resp.read())
-                real_pages = [t for t in targets
-                              if t.get('type') == 'page'
-                              and not t.get('url', '').startswith('chrome://')]
-                # Only our tab left (or nothing) — force a visible window
+                real_pages = [t for t in await self._get_pages()
+                              if not t.get('url', '').startswith('chrome://')]
                 if len(real_pages) <= 1:
                     await self.send('Target.createTarget', {
                         'url': '', 'newWindow': True,
                     })
-            except (websockets.ConnectionClosed, asyncio.CancelledError,
-                    asyncio.TimeoutError):
+            except Exception:
                 pass
             try:
                 # Drop SSE/WS connections — about:blank tears down page resources
