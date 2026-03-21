@@ -264,6 +264,39 @@ class CDPClient:
         self._owns_tab = False
         return self.session_id
 
+    async def close_tabs_by_origin(self, origin: str) -> int:
+        """Close all page tabs matching an origin (scheme://host:port).
+
+        Returns the number of tabs closed. Used by --keep-tab auto-replace
+        to prevent tab accumulation on repeated runs to the same site.
+        """
+        result = await self.send('Target.getTargets')
+        targets = result.get('result', {}).get('targetInfos', [])
+        closed = 0
+        for target in targets:
+            if target.get('type') != 'page':
+                continue
+            url = target.get('url', '')
+            if not url.startswith(origin):
+                continue
+            try:
+                await self.send('Target.closeTarget',
+                                {'targetId': target['targetId']}, timeout=5.0)
+                closed += 1
+            except (websockets.ConnectionClosed, asyncio.CancelledError,
+                    asyncio.TimeoutError):
+                pass
+        return closed
+
+    async def list_tabs(self) -> list[dict]:
+        """List all page tabs. Returns [{target_id, url, title}]."""
+        result = await self.send('Target.getTargets')
+        targets = result.get('result', {}).get('targetInfos', [])
+        return [
+            {'target_id': t['targetId'], 'url': t.get('url', ''), 'title': t.get('title', '')}
+            for t in targets if t.get('type') == 'page'
+        ]
+
     async def create_tab(self, foreground: bool = False) -> str:
         """Create a fresh tab and attach to it. Caller owns the tab lifecycle.
 

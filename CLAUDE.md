@@ -226,7 +226,7 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 5. **`click` with text — multiple matches**: When clicking by text, clicks the first visible match. Be specific.
 5a. **`click` smart dispatch**: `click` uses CSS chars (`. # [ : > ~ +`) to decide between selector and text. HTML tag names without CSS chars (`click "button"`, `click "div"`) are treated as **text**, not tag selectors. If you need `querySelector("button")`, use a CSS-specific form: `click "button:first-of-type"` or `click "[type=submit]"`.
 6. **Cookie banner button text**: Don't guess — button labels vary between sites and text click fails on doubled text from icon+label combinations. Always scout with `snapshot` first.
-7. **Tab handling**: `passe run` creates its own tab. On success, the tab is closed. **On failure, the tab is kept open** with a 30s flash timer — it auto-closes unless the user interacts (click/keypress/scroll). Stderr shows `passe run --reuse-tab -c "..."` to resume. `--flash [secs]` explicitly keeps a tab with auto-close (default 30s, implies `--keep-tab`). `--keep-tab` keeps without timer. `--no-keep-on-fail` forces cleanup on failure. Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching.
+7. **Tab handling**: `passe run` creates its own tab. On success, the tab is closed. **On failure, the tab is kept open** with a 30s flash timer — it auto-closes unless the user interacts (click/keypress/scroll). Stderr shows `passe run --reuse-tab -c "..."` to resume. `--flash [secs]` explicitly keeps a tab with auto-close (default 30s, implies `--keep-tab`). `--keep-tab` keeps without timer but **auto-replaces**: if a tab at the same origin already exists, it's closed before creating the new one — repeated `--keep-tab` runs to the same site don't accumulate stray tabs. `--no-keep-on-fail` forces cleanup on failure. Atomic commands attach to the first existing tab. If a click opens a *new* browser tab, passe stays on its own — no tab switching. For manual cleanup: `passe tabs` lists all Chrome tabs, `passe tabs close --all` or `passe tabs close --matching PATTERN` for bulk close.
 8. **Script errors are fatal**: No error recovery mid-script. Partial timing data still emitted to stderr.
 9. **DOM mutation during TreeWalker**: If using `eval` with `createTreeWalker` to walk and mutate the DOM (e.g. `replaceChild`), the walker loses its position and silently stops after 1-2 nodes. Collect nodes into an array first, then mutate in a second pass.
 10. **Multi-line JS in `eval`**: The DSL is line-based — `eval` takes one line. For multi-line JS, use `eval-file <path>` which reads from a file. Don't minify JS to fit on one line.
@@ -256,9 +256,13 @@ passe screenshot /tmp/current-page.png       # Screenshot current page (no navig
 passe eval "document.title"                  # Quick JS eval on current page
 
 passe explain -c 'goto URL; click .btn'      # Dry-run: validate without executing
+
+passe tabs                                   # List all Chrome tabs
+passe tabs close --all                       # Close all tabs except one
+passe tabs close --matching itv              # Close tabs matching URL pattern
 ```
 
-`look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only.
+`look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only. `tabs` queries Chrome directly via CDP — no state file.
 
 ### Continuous capture (daemon)
 

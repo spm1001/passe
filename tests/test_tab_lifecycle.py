@@ -151,6 +151,96 @@ async def test_attach_logs_tab_url_to_stderr():
 # ── close_tab: SSE/long-lived connection handling ───────────────────
 
 
+# ── close_tabs_by_origin: auto-replace ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_close_tabs_by_origin_closes_matching():
+    """Closes all page tabs whose URL starts with the given origin."""
+    client = _make_client()
+    client.send = AsyncMock(side_effect=[
+        _targets_result(
+            _page('tab-1', 'https://example.com/page1'),
+            _page('tab-2', 'https://example.com/page2'),
+            _page('tab-3', 'https://other.com/page'),
+        ),
+        {'result': {}},  # close tab-1
+        {'result': {}},  # close tab-2
+    ])
+
+    closed = await client.close_tabs_by_origin('https://example.com')
+
+    assert closed == 2
+    close_calls = [c for c in client.send.call_args_list
+                   if c[0][0] == 'Target.closeTarget']
+    assert len(close_calls) == 2
+    closed_ids = {c[0][1]['targetId'] for c in close_calls}
+    assert closed_ids == {'tab-1', 'tab-2'}
+
+
+@pytest.mark.asyncio
+async def test_close_tabs_by_origin_skips_non_page():
+    """Non-page targets (service workers, etc.) are ignored."""
+    client = _make_client()
+    client.send = AsyncMock(return_value=_targets_result(
+        {'type': 'service_worker', 'targetId': 'sw-1',
+         'url': 'https://example.com/sw.js'},
+    ))
+
+    closed = await client.close_tabs_by_origin('https://example.com')
+    assert closed == 0
+
+
+@pytest.mark.asyncio
+async def test_close_tabs_by_origin_no_match():
+    """Returns 0 when no tabs match the origin."""
+    client = _make_client()
+    client.send = AsyncMock(return_value=_targets_result(
+        _page('tab-1', 'https://other.com/page'),
+    ))
+
+    closed = await client.close_tabs_by_origin('https://example.com')
+    assert closed == 0
+
+
+@pytest.mark.asyncio
+async def test_close_tabs_by_origin_timeout_counted():
+    """Tabs where closeTarget times out are not counted as closed."""
+    client = _make_client()
+    client.send = AsyncMock(side_effect=[
+        _targets_result(
+            _page('tab-1', 'https://example.com/page'),
+        ),
+        asyncio.TimeoutError(),
+    ])
+
+    closed = await client.close_tabs_by_origin('https://example.com')
+    assert closed == 0
+
+
+# ── list_tabs ──────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_list_tabs_returns_pages_only():
+    """list_tabs returns page targets with id, url, title."""
+    client = _make_client()
+    client.send = AsyncMock(return_value={'result': {'targetInfos': [
+        {'type': 'page', 'targetId': 't1', 'url': 'https://a.com', 'title': 'A'},
+        {'type': 'service_worker', 'targetId': 'sw1', 'url': 'https://a.com/sw.js'},
+        {'type': 'page', 'targetId': 't2', 'url': 'https://b.com', 'title': 'B'},
+    ]}})
+
+    tabs = await client.list_tabs()
+
+    assert len(tabs) == 2
+    assert tabs[0] == {'target_id': 't1', 'url': 'https://a.com', 'title': 'A'}
+    assert tabs[1] == {'target_id': 't2', 'url': 'https://b.com', 'title': 'B'}
+
+
+# ── close_tab: SSE/long-lived connection handling ───────────────────
+
+
 @pytest.mark.asyncio
 async def test_close_tab_noop_when_not_owned():
     """close_tab() does nothing when we didn't create the tab."""

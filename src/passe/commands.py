@@ -1,4 +1,4 @@
-"""CLI subcommands — run, screenshot, eval, devices."""
+"""CLI subcommands — run, screenshot, eval, devices, tabs."""
 
 import json
 import os
@@ -161,17 +161,25 @@ async def cmd_run(source: str, inline: str = None,
         return
 
     async with connect() as (client, conn_info):
+        # Extract origin from first goto (used by --reuse-tab and --keep-tab auto-replace)
+        goto_origin = None
+        for verb, args in steps:
+            if verb == 'goto' and args:
+                from urllib.parse import urlparse
+                parsed = urlparse(args[0])
+                goto_origin = f'{parsed.scheme}://{parsed.netloc}'
+                break
+
         if reuse_tab:
-            # Extract origin from first goto to prefer the right tab
-            reuse_origin = None
-            for verb, args in steps:
-                if verb == 'goto' and args:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(args[0])
-                    reuse_origin = f'{parsed.scheme}://{parsed.netloc}'
-                    break
-            await client.attach_to_visible_page(origin=reuse_origin)
+            await client.attach_to_visible_page(origin=goto_origin)
         else:
+            # Auto-replace: close previous tabs at same origin before creating new one.
+            # Prevents tab accumulation on repeated --keep-tab runs.
+            if keep_tab and goto_origin:
+                closed = await client.close_tabs_by_origin(goto_origin)
+                if closed:
+                    print(f'[passe] closed {closed} existing tab(s) at {goto_origin}',
+                          file=sys.stderr)
             await client.create_tab(foreground=foreground)
         await client.send('Page.enable')
         # Apply device preset before script if --device flag used
@@ -658,3 +666,80 @@ def cmd_devices():
         dpr = f'{int(dpr_num)}x' if dpr_num == int(dpr_num) else f'{dpr_num}x'
         kind = 'mobile' if dev['mobile'] else 'desktop'
         print(f'{name:<16} {size:>11}  {dpr:>6}  {kind:<7}')
+
+
+async def cmd_tabs():
+    """List all Chrome tabs."""
+    async with connect() as (client, conn_info):
+        tabs = await client.list_tabs()
+        if not tabs:
+            print('No tabs open', file=sys.stderr)
+            return
+        for i, tab in enumerate(tabs):
+            url = tab['url'] or 'about:blank'
+            title = tab['title']
+            line = f'[{i}] {url}'
+            if title and title != url:
+                line += f'  ({title})'
+            print(line)
+        print(f'\n{len(tabs)} tab(s)', file=sys.stderr)
+
+
+async def cmd_tabs_close(args: list[str]):
+    """Close Chrome tabs. --all closes all but one, --matching PATTERN filters by URL."""
+    import re
+    close_all = '--all' in args
+    pattern = None
+    if '--matching' in args:
+        idx = args.index('--matching')
+        if idx + 1 < len(args):
+            pattern = args[idx + 1]
+        else:
+            print('passe tabs close: --matching requires a pattern', file=sys.stderr)
+            sys.exit(1)
+
+    if not close_all and not pattern:
+        print('passe tabs close: use --all or --matching PATTERN', file=sys.stderr)
+        sys.exit(1)
+
+    async with connect() as (client, conn_info):
+        tabs = await client.list_tabs()
+        if not tabs:
+            print('No tabs to close', file=sys.stderr)
+            return
+
+        to_close = []
+        if close_all:
+            # Keep one tab (Chrome quits if all tabs close)
+            to_close = tabs[:-1] if len(tabs) > 1 else []
+        elif pattern:
+            try:
+                pat = re.compile(pattern, re.IGNORECASE)
+            except re.error:
+                pat = None
+            for tab in tabs:
+                url = tab['url']
+                if pat and pat.search(url):
+                    to_close.append(tab)
+                elif not pat and pattern.lower() in url.lower():
+                    to_close.append(tab)
+            # Safety: don't close every tab
+            if len(to_close) == len(tabs) and len(tabs) > 1:
+                to_close = to_close[:-1]
+                print('[passe] keeping one tab to prevent Chrome from quitting',
+                      file=sys.stderr)
+
+        if not to_close:
+            print('No tabs matched', file=sys.stderr)
+            return
+
+        closed = 0
+        for tab in to_close:
+            try:
+                await client.send('Target.closeTarget',
+                                  {'targetId': tab['target_id']}, timeout=5.0)
+                closed += 1
+            except Exception:
+                pass
+
+        print(f'Closed {closed} tab(s)', file=sys.stderr)
