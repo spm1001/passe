@@ -1,0 +1,15 @@
+[Unit]
+Description=Passe network capture daemon
+After=chromium-cdp.service
+Wants=chromium-cdp.service
+
+[Service]
+Type=forking
+PIDFile=%h/.passe/.daemon.pid
+ExecStart=%h/.local/bin/passe log start --cdp http://localhost:9222
+ExecStop=%h/.local/bin/passe log stop
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

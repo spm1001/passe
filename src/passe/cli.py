@@ -19,6 +19,8 @@ from passe.connection import set_cdp_override
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices)
 from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
+from passe.log_lifecycle import (cmd_log_start, cmd_log_stop, cmd_log_status,
+                                 cmd_log_pause, cmd_log_unpause)
 
 # ── Re-exports for backward compatibility ─────────────────
 # Tests and external code import these from passe.cli.
@@ -73,6 +75,10 @@ Commands:
   passe eval <expression>         Eval JS on current page
   passe explain -c 'verbs...'     Dry-run: validate script without executing
   passe devices                   List available device presets
+  passe log start [--cdp URL]     Start capture daemon
+  passe log stop                  Stop capture daemon
+  passe log status                Daemon health and log stats
+  passe log pause / unpause      Pause/resume capture (daemon keeps running)
   passe log tail [-n N]           Recent network requests (newest first)
   passe log list [--filter P]     Filtered request list
   passe log show ID               Full request detail
@@ -162,6 +168,11 @@ LOG_HELP = """\
 passe log — query network capture logs
 
 Commands:
+  passe log start [--cdp URL]     Start capture daemon (detached)
+  passe log stop                  Stop capture daemon (SIGTERM, then SIGKILL)
+  passe log status                Daemon health, CDP endpoint, log stats
+  passe log pause                 Pause capture (daemon keeps running)
+  passe log unpause               Resume capture
   passe log tail [-n N]           Show N most recent requests (default 20, newest first)
   passe log list [flags]          Filtered request list (default limit 50)
   passe log show ID [flags]       Full request detail by ID prefix
@@ -366,7 +377,17 @@ def main():
             sys.exit(0 if log_args else 1)
         subcmd = log_args[0]
         sub_args = log_args[1:]
-        if subcmd == 'tail':
+        if subcmd == 'start':
+            cmd_log_start(sub_args, cdp_url=cdp_url)
+        elif subcmd == 'stop':
+            cmd_log_stop(sub_args)
+        elif subcmd == 'status':
+            cmd_log_status(sub_args)
+        elif subcmd == 'pause':
+            cmd_log_pause(sub_args)
+        elif subcmd == 'unpause':
+            cmd_log_unpause(sub_args)
+        elif subcmd == 'tail':
             cmd_log_tail(sub_args)
         elif subcmd == 'list':
             cmd_log_list(sub_args)
@@ -376,7 +397,8 @@ def main():
             cmd_log_clear(sub_args)
         else:
             print(f'passe log: unknown subcommand {subcmd!r}. '
-                  f'Use tail, list, show, or clear.',
+                  f'Use start, stop, status, pause, unpause, '
+                  f'tail, list, show, or clear.',
                   file=sys.stderr)
             sys.exit(1)
     else:
