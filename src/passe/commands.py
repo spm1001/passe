@@ -242,6 +242,12 @@ async def cmd_fetch(url: str, path: str = None,
                 if fp_result.content_type:
                     summary['content_type'] = fp_result.content_type
             else:
+                # resolve_fetch_output writes auto-temp files but not explicit
+                # paths (Chrome path writes via do_fetch_verb). Fast-path must
+                # write explicit paths itself.
+                if explicit_path:
+                    with open(resolved_path, 'w') as f:
+                        f.write(fp_result.markdown)
                 file_entry = {
                     'path': resolved_path, 'verb': 'fetch',
                     'source': fp_result.source,

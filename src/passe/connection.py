@@ -118,6 +118,43 @@ def _is_loopback(url: str) -> bool:
         return False
 
 
+def discover_chrome(cdp_url: str | None = None) -> tuple[str, dict]:
+    """Find Chrome and return (ws_url, browser_info).
+
+    Checks cdp_url arg → --cdp override → PASSE_CDP env → localhost:9222.
+    Rewrites ws://localhost WebSocket URLs for remote Chrome.
+    Does NOT auto-launch Chrome — raises ConnectionError if unreachable.
+
+    Returns:
+        ws_url: WebSocket URL for the browser-level debugger endpoint.
+        info: dict with 'cdp' (base URL), 'browser' (version string),
+              'remote' (bool).
+    """
+    base_url = cdp_url or _cdp_base_url()
+    is_remote = not _is_loopback(base_url)
+
+    try:
+        with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
+            version_info = json.loads(resp.read())
+    except Exception as exc:
+        raise ConnectionError(
+            f"Cannot connect to Chrome at {base_url}: {exc}"
+        ) from exc
+
+    ws_url = version_info['webSocketDebuggerUrl']
+    browser_str = version_info.get('Browser', 'unknown')
+
+    # Rewrite WS URL for remote Chrome — Chrome returns ws://localhost:...
+    if is_remote:
+        from urllib.parse import urlparse
+        parsed_base = urlparse(base_url)
+        parsed_ws = urlparse(ws_url)
+        ws_url = f'ws://{parsed_base.netloc}{parsed_ws.path}'
+
+    info = {'cdp': base_url, 'browser': browser_str, 'remote': is_remote}
+    return ws_url, info
+
+
 @contextlib.asynccontextmanager
 async def connect(port=9222):
     """Connect to Chrome, yield (CDPClient, info), clean up on exit.
@@ -142,10 +179,9 @@ async def connect(port=9222):
         # GUI when user explicitly pointed at localhost (they want Chrome Passe)
         headless = not cdp_explicit
         chrome_proc = _start_chrome(port, headless=headless)
-    with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
-        version_info = json.loads(resp.read())
-    ws_url = version_info['webSocketDebuggerUrl']
-    browser_str = version_info.get('Browser', 'unknown')
+
+    ws_url, disc_info = discover_chrome()
+    browser_str = disc_info['browser']
 
     # Log which Chrome we connected to
     if is_remote:
@@ -154,9 +190,6 @@ async def connect(port=9222):
         # Prominent note for remote Chrome — impossible to miss
         print(f'[passe] remote Chrome: {parsed_base.hostname}:{parsed_base.port} ({browser_str})',
               file=sys.stderr)
-        # Rewrite WS URL — Chrome returns ws://localhost:... which won't work remotely
-        parsed_ws = urlparse(ws_url)
-        ws_url = f'ws://{parsed_base.netloc}{parsed_ws.path}'
     elif chrome_proc is not None:
         print(f'[passe] Chrome: {browser_str} (bare profile — no auth cookies)',
               file=sys.stderr)
