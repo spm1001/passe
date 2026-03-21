@@ -6,7 +6,14 @@ Wants=chromium-cdp.service
 [Service]
 Type=forking
 PIDFile=%h/.passe/.daemon.pid
-ExecStart=%h/.local/bin/passe log start --cdp http://localhost:9222
+
+# Per-machine CDP endpoint. Override by creating ~/.passe/env with:
+#   PASSE_CDP=http://100.66.153.39:9222
+# If the file is absent, falls back to http://localhost:9222.
+EnvironmentFile=-%h/.passe/env
+Environment=PASSE_CDP=http://localhost:9222
+
+ExecStart=%h/.local/bin/passe log start
 ExecStop=%h/.local/bin/passe log stop
 Restart=on-failure
 RestartSec=10

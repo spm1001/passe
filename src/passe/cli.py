@@ -378,6 +378,9 @@ def main():
         subcmd = log_args[0]
         sub_args = log_args[1:]
         if subcmd == 'start':
+            # Global --cdp is stripped before subcommands see args.
+            # Forward it here because log start spawns a subprocess
+            # where set_cdp_override() doesn't carry over.
             cmd_log_start(sub_args, cdp_url=cdp_url)
         elif subcmd == 'stop':
             cmd_log_stop(sub_args)

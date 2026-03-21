@@ -3,6 +3,7 @@
 import json
 import os
 import signal
+from io import BytesIO
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -10,8 +11,8 @@ import pytest
 from passe.log_lifecycle import (
     cmd_log_start, cmd_log_stop, cmd_log_status,
     cmd_log_pause, cmd_log_unpause,
-    _read_state, _pid_alive, _clean_stale,
-    STATE_FILE, PID_FILE, LOG_DIR, PAUSE_FILE,
+    _read_state, _pid_alive, _clean_stale, _remove_state_files,
+    _check_chrome, _rotate_daemon_log, _wait_for_startup,
 )
 
 
@@ -51,6 +52,29 @@ class TestPidAlive:
     def test_dead_pid(self):
         assert not _pid_alive(99999999)
 
+    def test_permission_error_means_alive(self):
+        """PermissionError from kill(pid, 0) means process exists but
+        is owned by another user — should return True, not False."""
+        with patch('passe.log_lifecycle.os.kill',
+                   side_effect=PermissionError):
+            assert _pid_alive(1)
+
+
+class TestRemoveStateFiles:
+    def test_removes_both_files(self, passe_home):
+        state_file = passe_home / 'state.json'
+        pid_file = passe_home / '.daemon.pid'
+        state_file.write_text('{}')
+        pid_file.write_text('1')
+
+        _remove_state_files()
+
+        assert not state_file.exists()
+        assert not pid_file.exists()
+
+    def test_idempotent(self, passe_home):
+        _remove_state_files()  # no files exist — should not raise
+
 
 class TestCleanStale:
     def test_cleans_dead_pid(self, passe_home):
@@ -75,6 +99,76 @@ class TestCleanStale:
         assert state_file.exists()
 
 
+class TestCheckChrome:
+    def test_reachable(self):
+        body = json.dumps({'Browser': 'Chrome/146'}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch('passe.log_lifecycle.urllib.request.urlopen',
+                   return_value=mock_resp):
+            info = _check_chrome('http://localhost:9222')
+        assert info['Browser'] == 'Chrome/146'
+
+    def test_unreachable(self):
+        with patch('passe.log_lifecycle.urllib.request.urlopen',
+                   side_effect=Exception('refused')):
+            assert _check_chrome('http://localhost:9222') is None
+
+
+class TestRotateDaemonLog:
+    def test_rotates_large_file(self, passe_home):
+        log_dir = passe_home / 'logs'
+        daemon_log = log_dir / 'daemon.log'
+        daemon_log.write_text('x' * (1024 * 1024 + 1))
+
+        _rotate_daemon_log()
+
+        assert not daemon_log.exists()
+        assert (log_dir / 'daemon.log.1').exists()
+
+    def test_keeps_small_file(self, passe_home):
+        log_dir = passe_home / 'logs'
+        daemon_log = log_dir / 'daemon.log'
+        daemon_log.write_text('small')
+
+        _rotate_daemon_log()
+
+        assert daemon_log.exists()
+        assert not (log_dir / 'daemon.log.1').exists()
+
+
+class TestWaitForStartup:
+    def test_returns_true_when_state_appears(self, passe_home):
+        state_file = passe_home / 'state.json'
+
+        def write_state():
+            state_file.write_text(json.dumps({'pid': 42}))
+
+        # Write state after a tiny delay
+        import threading
+        t = threading.Timer(0.05, write_state)
+        t.start()
+
+        assert _wait_for_startup(42, timeout=1.0)
+
+    def test_returns_false_on_timeout(self, passe_home):
+        assert not _wait_for_startup(42, timeout=0.2)
+
+
+def _mock_chrome_check():
+    """Context manager that makes _check_chrome succeed."""
+    body = json.dumps({'Browser': 'Chrome/146'}).encode()
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = body
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    return patch('passe.log_lifecycle.urllib.request.urlopen',
+                 return_value=mock_resp)
+
+
 class TestCmdLogStart:
     def test_starts_daemon(self, passe_home, monkeypatch):
         monkeypatch.delenv('PASSE_CDP', raising=False)
@@ -85,14 +179,15 @@ class TestCmdLogStart:
         state_file = passe_home / 'state.json'
 
         def fake_popen(*args, **kwargs):
-            # Simulate daemon writing state.json
             state_file.write_text(json.dumps({
                 'pid': 42, 'cdp': 'http://localhost:9222',
                 'started': '2026-01-01T00:00:00Z',
             }))
             return mock_proc
 
-        with patch('passe.log_lifecycle.subprocess.Popen', side_effect=fake_popen) as mock_p:
+        with _mock_chrome_check(), \
+             patch('passe.log_lifecycle.subprocess.Popen',
+                   side_effect=fake_popen) as mock_p:
             cmd_log_start([], cdp_url='http://localhost:9222')
 
         call_args = mock_p.call_args
@@ -127,8 +222,17 @@ class TestCmdLogStart:
             }))
             return mock_proc
 
-        with patch('passe.log_lifecycle.subprocess.Popen', side_effect=fake_popen):
+        with _mock_chrome_check(), \
+             patch('passe.log_lifecycle.subprocess.Popen',
+                   side_effect=fake_popen):
             cmd_log_start([], cdp_url='http://localhost:9222')
+
+    def test_preflight_fails_on_unreachable_chrome(self, passe_home, monkeypatch):
+        monkeypatch.delenv('PASSE_CDP', raising=False)
+        with patch('passe.log_lifecycle.urllib.request.urlopen',
+                   side_effect=Exception('refused')):
+            with pytest.raises(SystemExit, match='1'):
+                cmd_log_start([], cdp_url='http://localhost:9222')
 
 
 class TestCmdLogStop:
@@ -143,18 +247,21 @@ class TestCmdLogStop:
 
         def fake_kill(pid, sig):
             kill_calls.append((pid, sig))
-            if sig == 0 and len([c for c in kill_calls if c[1] == 0]) > 2:
-                raise ProcessLookupError
+
+        call_count = 0
 
         def fake_alive(pid):
-            # Dead after first check (SIGTERM sent)
-            return len(kill_calls) < 2
+            nonlocal call_count
+            call_count += 1
+            return call_count <= 2  # alive twice, then dead
 
         with patch('passe.log_lifecycle.os.kill', side_effect=fake_kill), \
              patch('passe.log_lifecycle._pid_alive', side_effect=fake_alive):
             cmd_log_stop([])
 
         assert any(sig == signal.SIGTERM for _, sig in kill_calls)
+        assert not state_file.exists()
+        assert not pid_file.exists()
 
     def test_no_daemon_running(self, passe_home):
         with pytest.raises(SystemExit, match='1'):
@@ -180,14 +287,44 @@ class TestCmdLogStatus:
                           'method': 'POST', 'url': 'https://api.example.com'}) + '\n'
         )
 
-        with patch('urllib.request.urlopen',
-                    side_effect=Exception('no chrome')):
+        with patch('passe.log_lifecycle.urllib.request.urlopen',
+                   side_effect=Exception('no chrome')):
             cmd_log_status([])
 
         out = capsys.readouterr().out
         assert 'running' in out
         assert '2' in out  # 2 requests
         assert 'unreachable' in out
+
+    def test_json_output(self, passe_home, capsys):
+        state = {'pid': os.getpid(), 'cdp': 'http://localhost:9222',
+                 'started': '2026-01-01T00:00:00Z'}
+        (passe_home / 'state.json').write_text(json.dumps(state))
+
+        with patch('passe.log_lifecycle.urllib.request.urlopen',
+                   side_effect=Exception('no chrome')):
+            cmd_log_status(['--json'])
+
+        out = capsys.readouterr().out
+        result = json.loads(out)
+        assert result['daemon'] == 'running'
+        assert result['pid'] == os.getpid()
+        assert result['paused'] is False
+        assert result['chrome'] == 'unreachable'
+
+    def test_json_with_log_stats(self, passe_home, capsys):
+        log_file = passe_home / 'logs' / 'requests.jsonl'
+        log_file.write_text(
+            json.dumps({'id': 'r1', 'ts': '2026-01-01T00:00:01Z'}) + '\n'
+            + json.dumps({'id': 'r2', 'ts': '2026-01-01T00:00:02Z'}) + '\n'
+        )
+
+        cmd_log_status(['--json'])
+
+        result = json.loads(capsys.readouterr().out)
+        assert result['requests'] == 2
+        assert result['oldest'] == '2026-01-01T00:00:01Z'
+        assert result['newest'] == '2026-01-01T00:00:02Z'
 
 
 class TestPauseUnpause:
