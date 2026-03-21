@@ -288,6 +288,8 @@ The daemon (`log_daemon.py`) runs as a detached process with its own WebSocket t
 
 **One-shot vs continuous:** `passe capture URL /tmp/out.jsonl` records network for a single page visit (script verb). `passe log start` runs a background daemon that captures everything Chrome does — all tabs, all navigations, indefinitely. Query with `log tail`/`log list`/`log show`.
 
+**Query tools work on any JSONL file** — daemon logs or one-shot captures. Use `--file` to point at a capture file: `passe log tail --file /tmp/reqs.jsonl` or `passe log list --file /tmp/reqs.jsonl --method POST`. Don't reinvent with `cat | python3`.
+
 **systemd integration:** `contrib/passe-log.service` is a user service template. Uses `EnvironmentFile=-%h/.passe/env` for per-machine CDP config.
 
 ### Environment variables
