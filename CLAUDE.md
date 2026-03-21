@@ -141,7 +141,7 @@ passe run tests/checkout-flow.passe
 - `eval-file-to <out-path> <js-path>` — read JS from file, write result to file
 
 **Network:**
-- `capture [--bodies] <path>` — record all network requests during the script to a JSONL file. Place at the start of a script; writes on script exit. Each line: method, URL, status, content-type, headers, timing. `--bodies` opt-in includes response bodies (large). Step NDJSON summary shows request count, resource type breakdown, domains, and non-2xx errors — read the summary before opening the file.
+- `capture [--bodies] [--filter] <path>` — record all network requests during the script to a JSONL file. Place at the start of a script; writes on script exit. Uses the shared schema (same as `log_daemon.py`): `id`, `ts` (ISO 8601), `method`, `url`, `status`, `mime`, `resource_type`, `size`, `timing_ms`, `tab`, plus optional headers/bodies. `--bodies` opt-in includes response bodies (large). `--filter` skips noise (analytics, tracking pixels, browser extensions) using the daemon's skip lists. Step NDJSON summary shows request count, resource type breakdown, domains, and non-2xx errors — read the summary before opening the file.
 
 **Emulation:**
 - `device <"name"> [--dpr N]` — apply device preset (viewport, DPR, UA, touch, safe area). Available: iPhone 14 Pro, iPhone SE, Pixel 7, iPad Air, iPad Pro 11, Desktop 1080p. `--dpr 1` for smaller screenshots.
@@ -245,6 +245,7 @@ passe check https://example.com --contains "OK" --screenshot /tmp/proof.jpg
 
 passe capture https://example.com /tmp/reqs.jsonl              # Goto + network idle + network JSONL
 passe capture --bodies https://example.com /tmp/reqs.jsonl     # Include response bodies
+passe capture --filter https://example.com /tmp/reqs.jsonl     # Skip analytics/tracking noise
 
 passe fetch https://example.com              # Goto + auto-wait + read (short content inlined)
 passe fetch https://example.com /tmp/out.md  # Explicit path
@@ -302,6 +303,6 @@ When a `wait_for_event` waiter is active, events go directly to the waiter. When
 
 ### Network capture
 
-`CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. The collector doesn't consume events — they still flow to waiters and queues, so network idle detection (bare `wait`) coexists on the same event stream.
+`CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `requestWillBeSentExtraInfo`, `responseReceivedExtraInfo`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. ExtraInfo events enrich headers (e.g. Cookie, Set-Cookie) that Chrome omits from the base events. Wall-clock timing (`timing_ms`) is computed from `time.monotonic()` deltas between request and completion. `enable_network(large_buffers=True)` passes large buffer params so Chrome retains response bodies for `getResponseBody`. The collector doesn't consume events — they still flow to waiters and queues, so network idle detection (bare `wait`) coexists on the same event stream.
 
 No external dependencies beyond `websockets` (and `trafilatura` for content extraction). Everything else runs in Chrome's V8.
