@@ -280,15 +280,17 @@ Modular package under `src/passe/`:
 |--------|------|
 | `parser.py` | DSL parsing: `parse_script`, `split_inline`, verb sets (`KNOWN_VERBS`, `NAV_VERBS`) |
 | `client.py` | `CDPClient` — WebSocket message routing, tab lifecycle, network capture |
-| `connection.py` | `connect()` context manager, Chrome discovery/launch, `set_cdp_override()` |
+| `connection.py` | `connect()` context manager, `discover_chrome()`, Chrome discovery/launch, `set_cdp_override()` |
 | `verbs.py` | All `do_*` action functions (~25 verbs) |
 | `runner.py` | `run_script()` dispatch loop, capture summary helpers |
 | `commands.py` | CLI subcommands: `cmd_run`, `cmd_screenshot`, `cmd_eval`, `cmd_devices` |
 | `cli.py` | Entry point: `main()`, help text, re-exports for backward compat |
 | `_libs.py` | JS constants (Readability.js, Turndown.js, shadow flattening, extraction) |
 | `_devices.py` | Device emulation presets |
+| `log_daemon.py` | Continuous multi-tab capture daemon — own WebSocket handler, NOT CDPClient |
+| `log_query.py` | JSONL reader/formatter for `passe log` commands (zero passe imports) |
 
-Dependency graph is a strict DAG: parser/client (foundation) → connection/verbs → runner → commands → cli. No circular imports. `cli.py` re-exports all public symbols so `from passe.cli import X` still works — but new code should import from the owning module. Tests that mock verbs must patch `passe.runner.do_X` (when mocking inside `run_script`) or `passe.verbs.do_X` (when mocking inside another verb like `do_watch`).
+Dependency graph is a strict DAG: parser/client (foundation) → connection/verbs → runner → commands → cli. `log_daemon.py` sits parallel to verbs (imports `discover_chrome()` from connection, nothing else). `log_query.py` sits parallel to runner (zero passe imports). No circular imports. `cli.py` re-exports all public symbols so `from passe.cli import X` still works — but new code should import from the owning module. Tests that mock verbs must patch `passe.runner.do_X` (when mocking inside `run_script`) or `passe.verbs.do_X` (when mocking inside another verb like `do_watch`).
 
 ### Event buffering
 
