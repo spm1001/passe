@@ -20,7 +20,9 @@ The 100x speed gap isn't the browser — it's the protocol. MCP needs a model ro
 |------|------|
 | Screenshot a page, interact with it, test it | **passe** |
 | Extract content from any page (articles, SPAs, dashboards) | **passe** `extract` (trafilatura primary, Readability.js fallback) |
-| See what API calls a page makes | **passe** `capture` (network request recording to JSONL) |
+| See what API calls a page makes | **passe** `capture` (one-shot network recording to JSONL) |
+| Monitor all Chrome network traffic continuously | **passe** `log start` (daemon captures all tabs to `~/.passe/logs/`) |
+| What API calls is Chrome making right now? | **passe** `log tail` / `log list` (query daemon logs) |
 | Extract Workspace content (Drive docs, Gmail) | `mise fetch` |
 | Browse with the default Chrome profile interactively | `webctl` |
 | Full Playwright test suites with fixtures and assertions | Playwright directly |
@@ -258,6 +260,36 @@ passe explain -c 'goto URL; click .btn'      # Dry-run: validate without executi
 
 `look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only.
 
+### Continuous capture (daemon)
+
+For ongoing network monitoring across all Chrome tabs — not just a single page visit:
+
+```bash
+passe log start                           # Start daemon (uses PASSE_CDP or auto-discovers)
+passe log start --cdp http://localhost:9222  # Explicit Chrome endpoint
+passe log status                          # Health check: PID, CDP, Chrome, log stats
+passe log status --json                   # Machine-readable status
+
+passe log tail                            # Last 20 requests (newest first)
+passe log tail -n 50                      # Last 50
+passe log list --filter api.example.com   # Filter by URL pattern
+passe log list --method POST --status 4xx # Filter by method and status class
+passe log show REQUEST_ID --headers --body # Full request detail
+
+passe log pause                           # Stop writing (daemon keeps running)
+passe log unpause                         # Resume writing
+passe log stop                            # Shutdown daemon
+
+passe log clear                           # Delete all logs
+passe log clear --older 7d               # Keep last 7 days
+```
+
+The daemon (`log_daemon.py`) runs as a detached process with its own WebSocket to Chrome. It auto-attaches to all tabs, captures network events, and writes JSONL to `~/.passe/logs/requests.jsonl`. Reconnects automatically if Chrome restarts. Pre-flight check verifies Chrome is reachable before spawning.
+
+**One-shot vs continuous:** `passe capture URL /tmp/out.jsonl` records network for a single page visit (script verb). `passe log start` runs a background daemon that captures everything Chrome does — all tabs, all navigations, indefinitely. Query with `log tail`/`log list`/`log show`.
+
+**systemd integration:** `contrib/passe-log.service` is a user service template. Uses `EnvironmentFile=-%h/.passe/env` for per-machine CDP config.
+
 ### Environment variables
 
 - `PASSE_CDP` — CDP endpoint URL (default `http://localhost:9222`)
@@ -289,9 +321,10 @@ Modular package under `src/passe/`:
 | `_libs.py` | JS constants (Readability.js, Turndown.js, shadow flattening, extraction) |
 | `_devices.py` | Device emulation presets |
 | `log_daemon.py` | Continuous multi-tab capture daemon — own WebSocket handler, NOT CDPClient |
+| `log_lifecycle.py` | Daemon management: start/stop/status/pause/unpause (stdlib only) |
 | `log_query.py` | JSONL reader/formatter for `passe log` commands (zero passe imports) |
 
-Dependency graph is a strict DAG: parser/client (foundation) → connection/verbs → runner → commands → cli. `log_daemon.py` sits parallel to verbs (imports `discover_chrome()` from connection, nothing else). `log_query.py` sits parallel to runner (zero passe imports). No circular imports. `cli.py` re-exports all public symbols so `from passe.cli import X` still works — but new code should import from the owning module. Tests that mock verbs must patch `passe.runner.do_X` (when mocking inside `run_script`) or `passe.verbs.do_X` (when mocking inside another verb like `do_watch`).
+Dependency graph is a strict DAG: parser/client (foundation) → connection/verbs → runner → commands → cli. `log_daemon.py` sits parallel to verbs (imports `discover_chrome()` from connection, nothing else). `log_lifecycle.py` sits parallel to log_daemon (stdlib only, manages daemon as external process). `log_query.py` sits parallel to runner (zero passe imports). No circular imports. `cli.py` re-exports all public symbols so `from passe.cli import X` still works — but new code should import from the owning module. Tests that mock verbs must patch `passe.runner.do_X` (when mocking inside `run_script`) or `passe.verbs.do_X` (when mocking inside another verb like `do_watch`).
 
 ### Event buffering
 
