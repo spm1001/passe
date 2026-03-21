@@ -158,6 +158,36 @@ Rarely needed:
                             Most verbs work regardless of scroll position.
 """
 
+LOG_HELP = """\
+passe log — query network capture logs
+
+Commands:
+  passe log tail [-n N]           Show N most recent requests (default 20, newest first)
+  passe log list [flags]          Filtered request list (default limit 50)
+  passe log show ID [flags]       Full request detail by ID prefix
+  passe log clear [--older Nd]    Clear log entries
+
+Flags (tail, list):
+  --file <path>     Read from specific JSONL file (default: ~/.passe/logs/requests.jsonl)
+  --json            Output as JSONL (one JSON object per line)
+  -n <count>        Number of requests to show (tail only)
+
+Flags (list):
+  --filter <pat>    Filter by URL (regex, falls back to substring)
+  --method <M>      Filter by HTTP method (GET, POST, etc.)
+  --status <code>   Filter by status code (exact: 404) or class (4xx, 5xx)
+  --limit <N>       Max results (default 50)
+
+Flags (show):
+  --headers         Include request and response headers
+  --body            Include request and response bodies
+
+Flags (clear):
+  --older <dur>     Only clear entries older than duration (7d, 24h, 30m)
+
+Works on daemon logs (~/.passe/logs/requests.jsonl) and one-shot capture files (passe capture).
+"""
+
 
 def _run(coro):
     """Run an async command, catching unexpected exceptions as one-line errors."""
@@ -329,10 +359,9 @@ def main():
         cmd_devices()
     elif cmd == 'log':
         log_args = all_args[1:]
-        if not log_args:
-            print('Usage: passe log tail|list|show|clear [flags]',
-                  file=sys.stderr)
-            sys.exit(1)
+        if not log_args or log_args[0] in ('--help', '-h'):
+            print(LOG_HELP, file=sys.stderr)
+            sys.exit(0 if log_args else 1)
         subcmd = log_args[0]
         sub_args = log_args[1:]
         if subcmd == 'tail':
