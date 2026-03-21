@@ -434,6 +434,7 @@ async def cmd_check(url: str, contains: str, screenshot_path: str = None,
 
 
 async def cmd_capture(url: str, path: str, bodies: bool = False,
+                      filter_noise: bool = False,
                       device: str = None, dpr: float = None):
     """Atomic capture: create tab, enable network, goto + wait-idle, write JSONL."""
     import time
@@ -443,7 +444,7 @@ async def cmd_capture(url: str, path: str, bodies: bool = False,
     async with connect() as (client, conn_info):
         await client.create_tab()
         await client.send('Page.enable')
-        await client.enable_network()
+        await client.enable_network(large_buffers=True)
         if device:
             await do_device(client, device, dpr_override=dpr)
         try:
@@ -452,6 +453,12 @@ async def cmd_capture(url: str, path: str, bodies: bool = False,
             await do_wait_idle(client, timeout=30)
 
             requests = client.get_network_requests()
+            # Filter analytics/tracking noise
+            if filter_noise:
+                from passe.log_daemon import should_skip_url, should_skip_mime
+                requests = [r for r in requests
+                            if not should_skip_url(r.get('url', ''))
+                            and not should_skip_mime(r.get('content_type'))]
             if bodies:
                 import base64 as b64
                 for r in requests:
@@ -470,7 +477,9 @@ async def cmd_capture(url: str, path: str, bodies: bool = False,
                                           if is_base64 else len(body))
                     except Exception:
                         pass
-            _write_capture_jsonl(path, requests)
+            tab_info = {'id': client._target_id or '',
+                        'url': nav.get('url', url)}
+            _write_capture_jsonl(path, requests, tab_info=tab_info)
             cap_summary = _build_capture_summary(requests)
             ms = round((time.monotonic() - t0) * 1000, 1)
 

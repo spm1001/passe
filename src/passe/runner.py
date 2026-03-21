@@ -98,11 +98,55 @@ def _build_capture_summary(requests: list[dict]) -> dict:
     return summary
 
 
-def _write_capture_jsonl(path: str, requests: list[dict]) -> int:
-    """Write captured requests to JSONL file. Returns bytes written."""
+def _write_capture_jsonl(path: str, requests: list[dict],
+                         tab_info: dict | None = None) -> int:
+    """Write captured requests to JSONL in shared schema format.
+
+    Transforms CDPClient's internal format to the shared schema
+    matching log_daemon.py output. Field mapping:
+      requestId → id, content_type → mime, encoded_data_length → size.
+    Timestamp derived from CDP wallTime when available.
+    """
+    from datetime import datetime, timezone
+
     with open(path, 'w') as f:
         for r in requests:
-            f.write(json.dumps(r, default=str) + '\n')
+            wall_time = r.get('wall_time')
+            if wall_time:
+                ts = datetime.fromtimestamp(
+                    wall_time, tz=timezone.utc).isoformat()
+            else:
+                ts = datetime.now(timezone.utc).isoformat()
+
+            record = {
+                'id': r.get('requestId', ''),
+                'ts': ts,
+                'method': r.get('method'),
+                'url': r.get('url'),
+            }
+            if r.get('status') is not None:
+                record['status'] = r['status']
+            if r.get('content_type'):
+                record['mime'] = r['content_type']
+            if r.get('resource_type'):
+                record['resource_type'] = r['resource_type']
+            if r.get('encoded_data_length') is not None:
+                record['size'] = r['encoded_data_length']
+            if r.get('timing_ms') is not None:
+                record['timing_ms'] = r['timing_ms']
+            if tab_info:
+                record['tab'] = tab_info
+            if r.get('request_headers'):
+                record['request_headers'] = r['request_headers']
+            if r.get('response_headers'):
+                record['response_headers'] = r['response_headers']
+            if r.get('request_body'):
+                record['request_body'] = r['request_body']
+            # Response body from --bodies flag
+            if r.get('body'):
+                record['response_body'] = r['body']
+
+            f.write(json.dumps(record, default=str) + '\n')
     return os.path.getsize(path)
 
 
@@ -405,7 +449,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 if not cap_args:
                     raise RuntimeError('capture requires an output path')
                 capture_path = cap_args[0]
-                await client.enable_network()
+                await client.enable_network(large_buffers=capture_bodies)
 
             step_info['ms'] = round((time.monotonic() - t0) * 1000, 1)
             prev_verb = verb
@@ -443,6 +487,15 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
     # Finalize network capture — write JSONL and emit summary step
     if capture_path is not None:
         requests = client.get_network_requests()
+        # Build tab info for JSONL output
+        tab_info = None
+        if client._target_id:
+            tab_url = None
+            try:
+                tab_url = await do_eval(client, 'window.location.href')
+            except Exception:
+                pass
+            tab_info = {'id': client._target_id, 'url': tab_url or ''}
         # Fetch response bodies if --bodies was set
         if capture_bodies:
             total_body_bytes = 0
@@ -462,7 +515,7 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     total_body_bytes += r['body_size']
                 except Exception:
                     pass  # Body may not be available (e.g. streamed, evicted)
-        _write_capture_jsonl(capture_path, requests)
+        _write_capture_jsonl(capture_path, requests, tab_info=tab_info)
         cap_summary = _build_capture_summary(requests)
         if capture_bodies:
             cap_summary['body_bytes'] = total_body_bytes

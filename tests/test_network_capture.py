@@ -319,27 +319,180 @@ async def test_get_network_requests_sorted_by_timestamp():
     assert urls == ['https://api.com/a', 'https://api.com/b', 'https://api.com/c']
 
 
+# ── ExtraInfo header merging ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_request_extra_info_merges_headers():
+    """requestWillBeSentExtraInfo merges additional headers (e.g. Cookie)."""
+    events = [
+        _request_will_be_sent('r1', 'https://api.com/data'),
+        {'method': 'Network.requestWillBeSentExtraInfo',
+         'params': {'requestId': 'r1',
+                    'headers': {'Cookie': 'session=abc'}}},
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert r['request_headers']['Cookie'] == 'session=abc'
+    assert r['request_headers']['Accept'] == 'application/json'
+
+
+@pytest.mark.asyncio
+async def test_response_extra_info_merges_headers():
+    """responseReceivedExtraInfo merges additional headers (e.g. Set-Cookie)."""
+    events = [
+        _request_will_be_sent('r1', 'https://api.com/data'),
+        _response_received('r1', 200),
+        {'method': 'Network.responseReceivedExtraInfo',
+         'params': {'requestId': 'r1',
+                    'headers': {'Set-Cookie': 'token=xyz'}}},
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert r['response_headers']['Set-Cookie'] == 'token=xyz'
+    assert r['response_headers']['Content-Type'] == 'application/json'
+
+
+# ── Timing and request body ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_timing_ms_computed():
+    """timing_ms is computed from requestWillBeSent to loadingFinished."""
+    events = [
+        _request_will_be_sent('r1', 'https://api.com/data'),
+        _response_received('r1', 200),
+        _loading_finished('r1'),
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert 'timing_ms' in r
+    assert isinstance(r['timing_ms'], float)
+    assert r['timing_ms'] >= 0
+
+
+@pytest.mark.asyncio
+async def test_request_body_captured():
+    """POST request body (postData) is stored in the record."""
+    events = [
+        {'method': 'Network.requestWillBeSent',
+         'params': {
+             'requestId': 'r1',
+             'request': {
+                 'url': 'https://api.com/submit',
+                 'method': 'POST',
+                 'headers': {},
+                 'postData': '{"key":"value"}',
+             },
+             'type': 'XHR',
+             'timestamp': 1.0,
+             'wallTime': 1708000001.0,
+         }},
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert r['request_body'] == '{"key":"value"}'
+
+
+@pytest.mark.asyncio
+async def test_no_request_body_when_get():
+    """GET requests don't have request_body field."""
+    events = [
+        _request_will_be_sent('r1', 'https://api.com/data'),
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert 'request_body' not in r
+
+
+@pytest.mark.asyncio
+async def test_timing_not_set_on_failed():
+    """Failed requests don't get timing_ms (no loadingFinished)."""
+    events = [
+        _request_will_be_sent('r1', 'https://api.com/data'),
+        _loading_failed('r1'),
+    ]
+    ws = FakeWS(events)
+    client = CDPClient(ws)
+    client._network_enabled = True
+    await client.start()
+    await asyncio.sleep(0.05)
+
+    r = client._network_requests['r1']
+    assert 'timing_ms' not in r
+
+
 # ── JSONL serialization ──────────────────────────────────
 
 
 def test_write_capture_jsonl(tmp_path):
-    """Writes one JSON line per request, valid JSON on each."""
+    """Writes shared-schema JSONL: id/ts/mime/size instead of internal fields."""
     requests = [
         {'requestId': 'r1', 'url': 'https://api.com/a', 'method': 'GET',
-         'status': 200, 'resource_type': 'XHR', 'timestamp': 1.0},
+         'status': 200, 'content_type': 'application/json',
+         'resource_type': 'XHR', 'timestamp': 1.0, 'wall_time': 1708000001.0,
+         'encoded_data_length': 5678, 'timing_ms': 42.1,
+         'request_headers': {'Accept': 'application/json'},
+         'response_headers': {'Content-Type': 'application/json'}},
         {'requestId': 'r2', 'url': 'https://api.com/b', 'method': 'POST',
-         'status': 201, 'resource_type': 'XHR', 'timestamp': 2.0},
+         'status': 201, 'resource_type': 'XHR', 'timestamp': 2.0,
+         'request_body': '{"key":"val"}'},
     ]
+    tab = {'id': 'tab1', 'url': 'https://app.com'}
     path = str(tmp_path / 'reqs.jsonl')
-    _write_capture_jsonl(path, requests)
+    _write_capture_jsonl(path, requests, tab_info=tab)
 
     with open(path) as f:
         lines = f.readlines()
     assert len(lines) == 2
-    # Each line is valid JSON
     parsed = [json.loads(line) for line in lines]
-    assert parsed[0]['url'] == 'https://api.com/a'
-    assert parsed[1]['url'] == 'https://api.com/b'
+
+    # Shared schema field names
+    r1 = parsed[0]
+    assert r1['id'] == 'r1'
+    assert r1['url'] == 'https://api.com/a'
+    assert r1['mime'] == 'application/json'
+    assert r1['size'] == 5678
+    assert r1['timing_ms'] == 42.1
+    assert r1['tab'] == tab
+    assert r1['request_headers'] == {'Accept': 'application/json'}
+    assert r1['response_headers'] == {'Content-Type': 'application/json'}
+    assert 'ts' in r1
+    # Internal fields must not appear
+    assert 'requestId' not in r1
+    assert 'content_type' not in r1
+    assert 'encoded_data_length' not in r1
+    assert 'timestamp' not in r1
+    assert 'wall_time' not in r1
+
+    # Request body preserved
+    r2 = parsed[1]
+    assert r2['request_body'] == '{"key":"val"}'
 
 
 def test_write_capture_jsonl_empty(tmp_path):
@@ -471,6 +624,7 @@ async def test_capture_mid_script_warns(capsys):
     client.send = AsyncMock(return_value={'result': {'result': {'value': 'http://mock/'}}})
     client.wait_for_event = AsyncMock(return_value={})
     client._network_requests = {}
+    client._target_id = 'mock-tab'
 
     steps = [
         ('goto', ['http://example.com']),
@@ -492,6 +646,7 @@ async def test_capture_first_verb_no_warning(capsys):
     client.send = AsyncMock(return_value={'result': {'result': {'value': 'http://mock/'}}})
     client.wait_for_event = AsyncMock(return_value={})
     client._network_requests = {}
+    client._target_id = 'mock-tab'
 
     steps = [
         ('capture', ['/tmp/reqs.jsonl']),

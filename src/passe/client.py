@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+import time
 
 import websockets
 
@@ -31,6 +32,7 @@ class CDPClient:
         self._network_enabled: bool = False
         self._inflight_count: int = 0
         self._network_idle_event: asyncio.Event = asyncio.Event()
+        self._capture_t0: dict[str, float] = {}  # requestId → monotonic start
 
     async def start(self):
         self.receiver_task = asyncio.create_task(self._receiver())
@@ -112,13 +114,26 @@ class CDPClient:
             self._network_enabled = True
             await self.send('Network.enable')
 
-    async def enable_network(self):
-        """Enable Network domain and start a fresh capture (clears requests)."""
+    async def enable_network(self, large_buffers: bool = False):
+        """Enable Network domain and start a fresh capture (clears requests).
+
+        large_buffers=True passes large buffer params to Network.enable so
+        Chrome retains response bodies for getResponseBody calls. Required
+        for --bodies capture and streaming responses.
+        """
         self._network_requests.clear()
+        self._capture_t0.clear()
         self._inflight_count = 0
         self._network_idle_event.set()
         self._network_enabled = True
-        await self.send('Network.enable')
+        params = {}
+        if large_buffers:
+            params = {
+                'maxTotalBufferSize': 100_000_000,
+                'maxResourceBufferSize': 50_000_000,
+                'maxPostDataSize': 65536,
+            }
+        await self.send('Network.enable', params)
 
     async def disable_network(self):
         """Disable Network domain and stop collecting."""
@@ -142,7 +157,7 @@ class CDPClient:
 
         if method == 'Network.requestWillBeSent':
             request = params.get('request', {})
-            self._network_requests[request_id] = {
+            record = {
                 'requestId': request_id,
                 'method': request.get('method'),
                 'url': request.get('url'),
@@ -151,8 +166,18 @@ class CDPClient:
                 'timestamp': params.get('timestamp'),
                 'wall_time': params.get('wallTime'),
             }
+            post_data = request.get('postData')
+            if post_data:
+                record['request_body'] = post_data
+            self._network_requests[request_id] = record
+            self._capture_t0[request_id] = time.monotonic()
             self._inflight_count += 1
             self._network_idle_event.clear()
+        elif method == 'Network.requestWillBeSentExtraInfo':
+            if request_id in self._network_requests:
+                headers = params.get('headers', {})
+                self._network_requests[request_id].setdefault(
+                    'request_headers', {}).update(headers)
         elif method == 'Network.responseReceived':
             response = params.get('response', {})
             if request_id in self._network_requests:
@@ -163,10 +188,19 @@ class CDPClient:
                     'response_headers': dict(response.get('headers', {})),
                     'response_timestamp': params.get('timestamp'),
                 })
+        elif method == 'Network.responseReceivedExtraInfo':
+            if request_id in self._network_requests:
+                headers = params.get('headers', {})
+                self._network_requests[request_id].setdefault(
+                    'response_headers', {}).update(headers)
         elif method == 'Network.loadingFinished':
             if request_id in self._network_requests:
                 self._network_requests[request_id]['completed'] = True
                 self._network_requests[request_id]['encoded_data_length'] = params.get('encodedDataLength')
+                t0 = self._capture_t0.pop(request_id, None)
+                if t0 is not None:
+                    self._network_requests[request_id]['timing_ms'] = round(
+                        (time.monotonic() - t0) * 1000, 1)
             self._inflight_count = max(0, self._inflight_count - 1)
             if self._inflight_count == 0:
                 self._network_idle_event.set()
@@ -174,6 +208,7 @@ class CDPClient:
             if request_id in self._network_requests:
                 self._network_requests[request_id]['failed'] = True
                 self._network_requests[request_id]['error_text'] = params.get('errorText')
+            self._capture_t0.pop(request_id, None)
             self._inflight_count = max(0, self._inflight_count - 1)
             if self._inflight_count == 0:
                 self._network_idle_event.set()

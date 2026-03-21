@@ -326,13 +326,15 @@ def main():
     elif cmd == 'capture' and len(all_args) >= 2:
         cap_args = all_args[1:]
         bodies = '--bodies' in cap_args
-        cap_args = [a for a in cap_args if a != '--bodies']
+        filter_noise = '--filter' in cap_args
+        cap_args = [a for a in cap_args if a not in ('--bodies', '--filter')]
         url = cap_args[0] if len(cap_args) >= 1 else None
         path = cap_args[1] if len(cap_args) >= 2 else None
         if not url or not path:
             print('passe capture requires URL and output path', file=sys.stderr)
             sys.exit(1)
         _run(cmd_capture(url, path=path, bodies=bodies,
+                         filter_noise=filter_noise,
                          device=device_name, dpr=dpr_val))
     elif cmd == 'fetch' and len(all_args) >= 2:
         fetch_args = all_args[1:]
