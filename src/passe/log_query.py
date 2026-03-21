@@ -328,15 +328,20 @@ def cmd_log_tail(args: list[str]):
                 sys.exit(1)
             args = args[:idx] + args[idx + 2:]
 
+    explicit_file = False
     if '--file' in args:
         idx = args.index('--file')
         if idx + 1 < len(args):
             file_path = args[idx + 1]
+            explicit_file = True
             args = args[:idx] + args[idx + 2:]
 
     if not Path(file_path).exists():
-        print(f'passe log: no log file at {file_path}', file=sys.stderr)
-        sys.exit(1)
+        if explicit_file:
+            print(f'passe log: no log file at {file_path}', file=sys.stderr)
+            sys.exit(1)
+        print('No requests yet', file=sys.stderr)
+        return
 
     requests = read_requests(file_path)
     recent = requests[-count:]  # last N, oldest first
@@ -355,6 +360,7 @@ def cmd_log_tail(args: list[str]):
 def cmd_log_list(args: list[str]):
     """passe log list [--filter P] [--method M] [--status S] [--limit N] [--file PATH] [--json]"""
     file_path = str(DEFAULT_LOG_PATH)
+    explicit_file = False
     url_pattern = None
     method = None
     status_pattern = None
@@ -382,11 +388,15 @@ def cmd_log_list(args: list[str]):
                     limit = val
                 elif attr == 'file_path':
                     file_path = val
+                    explicit_file = True
                 args = args[:idx] + args[idx + 2:]
 
     if not Path(file_path).exists():
-        print(f'passe log: no log file at {file_path}', file=sys.stderr)
-        sys.exit(1)
+        if explicit_file:
+            print(f'passe log: no log file at {file_path}', file=sys.stderr)
+            sys.exit(1)
+        print('No requests yet', file=sys.stderr)
+        return
 
     requests = read_requests(file_path)
     filtered = filter_requests(requests, url_pattern=url_pattern,
