@@ -13,6 +13,7 @@ ConnectionClosed, and CancelledError without re-raising.
 
 import asyncio
 import io
+import json
 import sys
 from unittest.mock import AsyncMock, patch
 
@@ -239,6 +240,25 @@ async def test_list_tabs_returns_pages_only():
 
 
 # ── close_tab: SSE/long-lived connection handling ───────────────────
+
+# close_tab now checks /json to avoid leaving Chrome windowless.
+# Mock the HTTP call to return multiple pages so the safety check
+# is a no-op and tests focus on the close logic itself.
+_MULTI_PAGE_JSON = json.dumps([
+    {'type': 'page', 'url': 'https://a.com'},
+    {'type': 'page', 'url': 'https://b.com'},
+]).encode()
+
+
+@pytest.fixture(autouse=True)
+def _mock_json_endpoint(monkeypatch):
+    """Make close_tab's /json safety check see multiple pages (no-op)."""
+    from unittest.mock import MagicMock
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = _MULTI_PAGE_JSON
+    mock_resp.__enter__ = lambda s: s
+    mock_resp.__exit__ = MagicMock(return_value=False)
+    monkeypatch.setattr('urllib.request.urlopen', lambda *a, **kw: mock_resp)
 
 
 @pytest.mark.asyncio

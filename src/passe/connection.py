@@ -200,6 +200,7 @@ async def connect(port=9222):
 
     ws = await websockets.connect(ws_url, max_size=50 * 1024 * 1024)
     client = CDPClient(ws)
+    client._cdp_http = base_url
     await client.start()
     conn_info = {
         'cdp': base_url, 'browser': browser_str, 'remote': is_remote,

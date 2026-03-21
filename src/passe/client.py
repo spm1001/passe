@@ -29,6 +29,7 @@ class CDPClient:
         self._owns_tab: bool = False
         # Network capture: requestId → merged request/response data
         self._network_requests: dict[str, dict] = {}
+        self._cdp_http: str = 'http://localhost:9222'
         self._network_enabled: bool = False
         self._inflight_count: int = 0
         self._network_idle_event: asyncio.Event = asyncio.Event()
@@ -323,9 +324,32 @@ class CDPClient:
 
         Navigates to about:blank first to drop SSE/WebSocket connections
         that would otherwise block Target.closeTarget indefinitely.
+
+        If this is the last tab, creates a new-tab-page first so Chrome
+        keeps its window open.
         """
         self._network_enabled = False
         if self._owns_tab and self._target_id:
+            # Safety: don't leave Chrome windowless.
+            # Use /json HTTP endpoint — Target.getTargets needs discovery
+            # enabled and misses tabs on fresh connections.
+            try:
+                import json as _json
+                import urllib.request
+                with urllib.request.urlopen(
+                        f'{self._cdp_http}/json', timeout=3) as resp:
+                    targets = _json.loads(resp.read())
+                real_pages = [t for t in targets
+                              if t.get('type') == 'page'
+                              and not t.get('url', '').startswith('chrome://')]
+                # Only our tab left (or nothing) — force a visible window
+                if len(real_pages) <= 1:
+                    await self.send('Target.createTarget', {
+                        'url': '', 'newWindow': True,
+                    })
+            except (websockets.ConnectionClosed, asyncio.CancelledError,
+                    asyncio.TimeoutError):
+                pass
             try:
                 # Drop SSE/WS connections — about:blank tears down page resources
                 await self.send('Page.navigate', {'url': 'about:blank'}, timeout=5.0)
