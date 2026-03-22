@@ -778,6 +778,11 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             source = 'unknown'
             warning = f'Unknown source: {force_source}. Use trafilatura, readability, or innertext.'
 
+        # Resolve relative URLs in trafilatura output (forced path too)
+        if fs == 'trafilatura' and markdown and page_url:
+            from ._postprocess import resolve_relative_urls
+            markdown = resolve_relative_urls(markdown, page_url)
+
         # Thin-read diagnostics (shared with cascade path)
         thin_read = _check_thin_read(markdown, html, page_text_length,
                                      page_html_length, page_title, status_code)
@@ -930,6 +935,11 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             markdown = ''
             source = 'innerText'
             warning = 'All extractors returned empty'
+
+    # Resolve relative URLs in trafilatura output (trafilatura doesn't do this)
+    if source == 'trafilatura' and markdown and page_url:
+        from ._postprocess import resolve_relative_urls
+        markdown = resolve_relative_urls(markdown, page_url)
 
     # Ratio warning for trafilatura/readability paths
     if source in ('trafilatura', 'readability') and page_text_length > 0 and markdown:

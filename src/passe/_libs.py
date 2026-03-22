@@ -44,5 +44,75 @@ SHADOW_FLATTEN_JS = r'''(() => {
   return ser(document.documentElement);
 })()'''
 
+# Metadata extraction JS — extracts structured metadata from the current page.
+# Returns JSON with: title, url, language, canonical, favicon, author, published,
+# description, OpenGraph, Twitter Card, Schema.org/JSON-LD, and all meta tags.
+# Inspired by Obsidian Clipper's variable system. Runs in <5ms.
+METADATA_JS = r'''(() => {
+  const meta = {};
+  meta.title = document.title;
+  meta.url = window.location.href;
+  meta.language = document.documentElement.lang || '';
+
+  // All meta tags (name and property)
+  const metaTags = {};
+  document.querySelectorAll('meta[name], meta[property]').forEach(el => {
+    const key = el.getAttribute('name') || el.getAttribute('property');
+    const content = el.getAttribute('content');
+    if (key && content) metaTags[key] = content;
+  });
+  meta.metaTags = metaTags;
+
+  // OpenGraph
+  meta.og = {};
+  document.querySelectorAll('meta[property^="og:"]').forEach(el => {
+    const key = el.getAttribute('property').replace('og:', '');
+    meta.og[key] = el.getAttribute('content');
+  });
+
+  // Twitter Card
+  meta.twitter = {};
+  document.querySelectorAll('meta[name^="twitter:"], meta[property^="twitter:"]').forEach(el => {
+    const key = (el.getAttribute('name') || el.getAttribute('property')).replace('twitter:', '');
+    meta.twitter[key] = el.getAttribute('content');
+  });
+
+  // Schema.org / JSON-LD
+  meta.jsonLd = [];
+  document.querySelectorAll('script[type="application/ld+json"]').forEach(el => {
+    try { meta.jsonLd.push(JSON.parse(el.textContent)); } catch(e) {}
+  });
+
+  // Canonical URL + favicon
+  const canonical = document.querySelector('link[rel="canonical"]');
+  meta.canonical = canonical ? canonical.href : null;
+  const favicon = document.querySelector('link[rel="icon"], link[rel="shortcut icon"]');
+  meta.favicon = favicon ? favicon.href : null;
+
+  // Author (multiple sources)
+  meta.author = metaTags['author']
+    || metaTags['article:author']
+    || metaTags['dc.creator']
+    || '';
+
+  // Published date (multiple sources)
+  meta.published = metaTags['article:published_time']
+    || metaTags['datePublished']
+    || metaTags['dc.date']
+    || '';
+  if (!meta.published) {
+    const timeEl = document.querySelector('time[datetime]');
+    if (timeEl) meta.published = timeEl.getAttribute('datetime');
+  }
+
+  // Description
+  meta.description = metaTags['description']
+    || metaTags['og:description']
+    || metaTags['twitter:description']
+    || '';
+
+  return JSON.stringify(meta);
+})()'''
+
 EXTRACT_JS = '(function(){try{var pageTextLength=document.body.innerText.length;var doc=document.cloneNode(true);var article=new Readability(doc).parse();if(!article){return JSON.stringify({title:document.title,markdown:document.body.innerText,fallback:true,pageTextLength:pageTextLength});}\nvar codeBlocks=[];var content=article.content.replace(/<pre[\\s\\S]*?<\\/pre>/gi,function(match){var idx=codeBlocks.length;codeBlocks.push(match);return\'<div data-code-placeholder="\'+idx+\'"></div>\';});var td=new TurndownService({headingStyle:\'atx\',codeBlockStyle:\'fenced\',bulletListMarker:\'-\'});var markdown=td.turndown(content);codeBlocks.forEach(function(block,idx){var codeContent=block.replace(/<[^>]+>/g,\'\');markdown=markdown.replace(new RegExp(\'\\\\n*\\\\s*\\\\n*\',\'g\'),\'\\n```\\n\'+codeContent+\'\\n```\\n\');});return JSON.stringify({title:article.title,byline:article.byline||null,excerpt:article.excerpt||null,markdown:markdown,length:article.length,pageTextLength:pageTextLength});}catch(e){return JSON.stringify({title:document.title,markdown:document.body.innerText,fallback:true,error:e.message,pageTextLength:(typeof pageTextLength!==\'undefined\')?pageTextLength:0});}})()'
 
