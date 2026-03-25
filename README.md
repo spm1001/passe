@@ -86,6 +86,17 @@ Output is structured JSON — NDJSON per step on stderr, summary on stdout:
 {"ok": true, "steps": 2, "total_ms": 213.4, "files": ["/tmp/page.png"], "final_url": "https://example.com/"}
 ```
 
+### Exit codes
+
+| Code | Meaning | Agent action |
+|------|---------|--------------|
+| **0** | Success | Proceed |
+| **1** | Failure — script step failed, connection refused, bad arguments, or thin extraction | Check `"ok"` and `"thin"` in the JSON summary to decide next steps |
+| **2** | Exception in `passe fetch` itself (not the page) | Report the error; do not retry the same command |
+| **130** | Interrupted (Ctrl-C) | — |
+
+Most failures exit 1. For `passe fetch`, a special case: if extraction succeeded but returned suspiciously little content, the JSON summary includes `"thin": true` and the exit code is still 1. This is the one case where retrying with `--source readability` may help. For other exit 1 causes (connection failures, bad selectors, assertion errors), the summary's `"error"` field has details.
+
 ## The DSL
 
 One verb per line. Short scripts inline with `-c` (`;` as separator), longer scripts as heredoc or `.passe` files.
