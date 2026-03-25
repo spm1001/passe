@@ -1,5 +1,20 @@
 # Changelog
 
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Added
+- `passe tabs` subcommand for listing open tabs
+- `--keep-tab` auto-replace flag
+- Daemon lifecycle CLI: `passe log start/stop/status/pause/unpause` for continuous multi-tab network capture
+- `passe log` query tools: `tail`, `list`, `show`, `clear`
+
+### Changed
+- Unified tab discovery via `_get_pages()` HTTP endpoint
+
 ## [0.3.0] - 2026-03-18
 
 Batterie-wide consistency pass: docs consolidation, CI, versioning.
