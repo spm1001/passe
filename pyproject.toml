@@ -2,12 +2,30 @@
 name = "passe"
 dynamic = ["version"]
 description = "Fast CDP browser automation — the kitchen pass for Chrome"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
 dependencies = [
     "websockets>=12.0",
     "trafilatura>=2.0",
     "httpx>=0.28.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/spm1001/passe"
+Changelog = "https://github.com/spm1001/passe/blob/main/CHANGELOG.md"
 
 [project.scripts]
 passe = "passe.cli:main"
