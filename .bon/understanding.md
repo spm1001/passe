@@ -32,6 +32,10 @@ Chrome's CDP has two tab discovery mechanisms: the `/json` HTTP endpoint (always
 
 `parser.py` owns verb vocabulary and aliases. `runner.py` owns the dispatch loop — aliases resolved in parser mean no runner changes needed. `commands.py` owns tab lifecycle (keep_tab, close_tab, flash timers). `cli.py` owns the entry point and `-c` flag parsing. `_libs.py` holds all JS that runs inside Chrome. `log_daemon.py` owns the continuous capture daemon — its own WebSocket handler, independent of CDPClient. `log_query.py` owns JSONL reading/formatting with zero passe imports. `connection.py` owns `discover_chrome()` (used by both `connect()` and the daemon) plus Chrome auto-launch. Dependency graph is a strict DAG with no circular imports.
 
+## OOPiF Iframe Targeting (March 2026)
+
+Chrome exposes cross-origin iframes (OOPiFs) as first-class CDP targets in `/json/list` with `type: "iframe"`, their own `targetId`, `parentId`, and `webSocketDebuggerUrl`. You attach via `Target.attachToTarget` on the same browser WebSocket — both parent and iframe sessions coexist, and you swap `sessionId` to toggle context. Everything works except `Page.captureScreenshot`, which Chrome restricts to top-level targets only. The parentId chain can be deeply nested (PowerPoint tab → intermediate Office iframe → Claude plugin iframe), so walking up to the root page requires iterating. Same-origin iframes never appear in `/json/list` — they share the parent's process and are reachable via `eval` with `contentDocument`. Headless Chrome with `--no-sandbox` doesn't produce OOPiFs at all, so testing iframe targeting requires a real Chrome profile with site isolation enabled.
+
 ## Chrome Log Absorption (March 2026)
 
 skill-chrome-log (a separate repo) provides continuous background network capture across all Chrome tabs — always-on recording of HTTP traffic to JSONL, with CLI query tools and an HTML dashboard. It's been absorbed into passe as `passe log` subcommands, making passe the single Chrome tool.
