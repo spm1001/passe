@@ -421,11 +421,21 @@ async def do_screenshot(client: CDPClient, path: str = None,
         }
         params['captureBeyondViewport'] = True
 
+    # Page.captureScreenshot is top-level only — switch to parent if in iframe
+    iframe_session = client._switch_session_for_screenshot()
+    if iframe_session:
+        print('[screenshot] switching to parent tab '
+              '(Page.captureScreenshot is top-level only)',
+              file=sys.stderr)
+
     # Screenshot rasterisation can be slow on software-rendered headless Chrome:
     # Wikipedia Cat (765×16384, DPR=1) takes 66s on --disable-gpu with 2 raster
     # threads.  Use a generous timeout so we only fire on a dead browser, not on
     # a page that's legitimately large.
-    result = await client.send('Page.captureScreenshot', params, timeout=300.0)
+    try:
+        result = await client.send('Page.captureScreenshot', params, timeout=300.0)
+    finally:
+        client._restore_session_after_screenshot(iframe_session)
     capture_ms = round((time.monotonic() - t0) * 1000, 1)
 
     t1 = time.monotonic()
@@ -1282,4 +1292,19 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
         print(json.dumps({
             'event': 'watch_stopped', 'total_captures': capture_count,
         }), file=sys.stderr)
+
+
+async def do_frame(client: CDPClient, target: str, timeout: float = 10.0):
+    """Switch execution context to an iframe or back to parent.
+
+    target='top' switches back to parent tab session.
+    Otherwise, target is a URL substring to match against iframe URLs.
+    Enables Page domain in the new context so subsequent verbs
+    (goto, screenshot) can use Page events.
+    """
+    if target.lower() == 'top':
+        await client.switch_to_parent()
+    else:
+        await client.attach_to_frame(target, timeout=timeout)
+    await client.send('Page.enable')
 

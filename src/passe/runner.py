@@ -20,7 +20,7 @@ from passe.verbs import (
     do_screenshot, do_snapshot, do_read, do_fetch,
     do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
-    do_assert, do_watch,
+    do_assert, do_watch, do_frame,
 )
 
 
@@ -434,6 +434,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 await do_assert(client, args[0])
             elif verb == 'log':
                 print(f'[log] {args[0]}', file=sys.stderr)
+            elif verb == 'frame':
+                timeout = float(args[1]) if len(args) > 1 else 10.0
+                await do_frame(client, args[0], timeout=timeout)
+                if args[0].lower() == 'top':
+                    step_info['target'] = 'top'
+                else:
+                    step_info['frame_url'] = args[0]
             elif verb == 'bring-to-front':
                 await client.send('Page.bringToFront')
             elif verb == 'capture':

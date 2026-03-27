@@ -18,7 +18,7 @@ import sys
 from passe.connection import set_cdp_override
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices,
-                            cmd_tabs, cmd_tabs_close)
+                            cmd_tabs, cmd_tabs_close, cmd_frames)
 from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
 from passe.log_lifecycle import (cmd_log_start, cmd_log_stop, cmd_log_status,
                                  cmd_log_pause, cmd_log_unpause)
@@ -39,7 +39,7 @@ from passe.verbs import (  # noqa: F401
     do_screenshot, do_snapshot, do_read, do_fetch,
     do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
-    do_assert, do_watch, _check_thin_read,
+    do_assert, do_watch, do_frame, _check_thin_read,
 )
 from passe.runner import run_script, _build_capture_summary, _write_capture_jsonl  # noqa: F401
 
@@ -79,6 +79,7 @@ Commands:
   passe tabs                      List open Chrome tabs
   passe tabs close --all          Close all tabs except one
   passe tabs close --matching P   Close tabs matching URL pattern
+  passe frames                    List iframe targets (OOPiFs)
   passe log start [--cdp URL]     Start capture daemon
   passe log stop                  Stop capture daemon
   passe log status                Daemon health and log stats
@@ -92,6 +93,7 @@ Global flags:
   --cdp <url>       CDP endpoint (default: PASSE_CDP env or http://localhost:9222)
   --device <name>   Device emulation preset (e.g. "iPhone 14 Pro")
   --dpr <n>         Override device pixel ratio
+  --frame <pattern> Target an iframe by URL substring (OOPiF)
 
 Run flags:
   --keep-tab        Keep tab open after script
@@ -159,6 +161,8 @@ Control:
   wait-idle [seconds]       Wait for network to settle (default 30)
   wait-navigation           Wait for page load event
   watch [flags] <path>      Auto-screenshot on HMR/DOM changes. --fast, --cooldown <ms> (default 1000)
+  frame <url-pattern>       Switch to iframe matching URL (OOPiF)
+  frame top                 Switch back to parent tab context
   bring-to-front            Make tab visible (required for jsaction sites like Google Groups)
   assert <expression>       Fail script if JS expression is falsy
   log <message>             Print to stderr
@@ -231,6 +235,7 @@ def main():
     device_name, all_args = _extract_flag(all_args, '--device')
     dpr_str, all_args = _extract_flag(all_args, '--dpr')
     dpr_val = float(dpr_str) if dpr_str else None
+    frame_pattern, all_args = _extract_flag(all_args, '--frame')
 
     # Re-derive cmd after extracting global flags
     if not all_args:
@@ -281,6 +286,7 @@ def main():
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 keep_on_fail=not no_keep_on_fail,
                                 flash=flash_val, foreground=foreground,
+                                frame=frame_pattern,
                                 device=device_name, dpr=dpr_val))
         elif len(run_args) >= 1:
             arg = run_args[0]
@@ -290,6 +296,7 @@ def main():
                                     keep_tab=keep_tab, reuse_tab=reuse_tab,
                                     keep_on_fail=not no_keep_on_fail,
                                     flash=flash_val, foreground=foreground,
+                                    frame=frame_pattern,
                                     device=device_name, dpr=dpr_val))
             else:
                 # Auto-detect inline script: join all args, check for
@@ -309,6 +316,7 @@ def main():
                                         keep_tab=keep_tab, reuse_tab=reuse_tab,
                                         keep_on_fail=not no_keep_on_fail,
                                         flash=flash_val, foreground=foreground,
+                                        frame=frame_pattern,
                                         device=device_name, dpr=dpr_val))
                 else:
                     print(f'passe run: {arg!r} is not a file and '
@@ -369,9 +377,10 @@ def main():
                   file=sys.stderr)
             sys.exit(1)
     elif cmd == 'screenshot' and len(all_args) >= 2:
-        _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val))
+        _run(cmd_screenshot(all_args[1:], device=device_name, dpr=dpr_val,
+                            frame=frame_pattern))
     elif cmd == 'eval' and len(all_args) >= 2:
-        _run(cmd_eval(' '.join(all_args[1:])))
+        _run(cmd_eval(' '.join(all_args[1:]), frame=frame_pattern))
     elif cmd == 'devices':
         cmd_devices()
     elif cmd == 'log':
@@ -408,6 +417,8 @@ def main():
                   f'tail, list, show, or clear.',
                   file=sys.stderr)
             sys.exit(1)
+    elif cmd == 'frames':
+        _run(cmd_frames())
     elif cmd == 'tabs':
         tabs_args = all_args[1:]
         if not tabs_args:

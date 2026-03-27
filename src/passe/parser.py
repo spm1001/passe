@@ -12,7 +12,7 @@ KNOWN_VERBS = {
     'press', 'hover', 'tap', 'swipe', 'scroll', 'screenshot', 'snapshot', 'read', 'extract', 'fetch',
     'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
-    'assert', 'log', 'bring-to-front',
+    'assert', 'log', 'bring-to-front', 'frame',
 }
 
 # Verbs that trigger auto-wait in the next read/fetch step.
@@ -47,6 +47,8 @@ VERB_SUGGESTIONS = {
     'scroll-right': ('scroll', 'scroll uses coordinates: scroll 500 0'),
     'click-if': ('click', 'click-if was removed — use click or eval to check first'),
     'wait-navigation': ('wait', 'wait-navigation was removed — use bare wait for network idle'),
+    'iframe': ('frame', None),
+    'switch-frame': ('frame', None),
 }
 
 # Direction words used as args to scroll (e.g. "scroll down 500")
@@ -64,6 +66,7 @@ VERB_MIN_ARGS = {
     'wait-for': 1,
     'eval': 1, 'eval-to': 2, 'eval-file': 1, 'eval-file-to': 2,
     'assert': 1, 'log': 1, 'capture': 1,
+    'frame': 1,
 }
 
 

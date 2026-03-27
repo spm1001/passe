@@ -35,6 +35,11 @@ class CDPClient:
         self._inflight_count: int = 0
         self._network_idle_event: asyncio.Event = asyncio.Event()
         self._capture_t0: dict[str, float] = {}  # requestId → monotonic start
+        # Frame (OOPiF) targeting: stash parent session when attached to iframe
+        self._parent_session_id: str | None = None
+        self._parent_target_id: str | None = None
+        self._frame_target_id: str | None = None
+        self._in_frame: bool = False
 
     async def start(self):
         self.receiver_task = asyncio.create_task(self._receiver())
@@ -238,6 +243,34 @@ class CDPClient:
                 if t.get('type') == 'page'
             ]
 
+    async def _get_frames(self) -> list[dict]:
+        """Discover iframe (OOPiF) targets via HTTP /json/list.
+
+        Returns [{targetId, parentId, url, title, type}]. Only cross-origin
+        iframes appear — same-origin iframes share the parent's process and
+        are reachable via eval on the parent.
+        """
+        try:
+            with urllib.request.urlopen(
+                    f'{self._cdp_http}/json/list', timeout=3) as resp:
+                targets = json.loads(resp.read())
+            return [
+                {'targetId': t['id'], 'parentId': t.get('parentId', ''),
+                 'url': t.get('url', ''), 'title': t.get('title', ''),
+                 'type': 'iframe'}
+                for t in targets if t.get('type') == 'iframe'
+            ]
+        except Exception:
+            result = await self.send('Target.getTargets')
+            return [
+                {'targetId': t['targetId'],
+                 'parentId': t.get('openerTargetId', ''),
+                 'url': t.get('url', ''), 'title': t.get('title', ''),
+                 'type': 'iframe'}
+                for t in result.get('result', {}).get('targetInfos', [])
+                if t.get('type') == 'iframe'
+            ]
+
     async def attach_to_first_page(self) -> str:
         """Attach to an existing tab. Used by atomic commands (screenshot, eval)."""
         pages = await self._get_pages()
@@ -316,6 +349,159 @@ class CDPClient:
             {'target_id': t['targetId'], 'url': t.get('url', ''), 'title': t.get('title', '')}
             for t in pages
         ]
+
+    async def list_frames(self) -> list[dict]:
+        """List all iframe targets. Returns [{target_id, parent_id, url, title}]."""
+        frames = await self._get_frames()
+        return [
+            {'target_id': f['targetId'], 'parent_id': f.get('parentId', ''),
+             'url': f.get('url', ''), 'title': f.get('title', '')}
+            for f in frames
+        ]
+
+    async def _find_root_page(self, iframe: dict) -> dict | None:
+        """Walk parentId chain from an iframe up to the root page target.
+
+        Returns the page target dict, or None if the chain can't be resolved.
+        Uses /json/list which returns both pages and iframes with parentId.
+        """
+        try:
+            with urllib.request.urlopen(
+                    f'{self._cdp_http}/json/list', timeout=3) as resp:
+                all_targets = json.loads(resp.read())
+        except Exception:
+            return None
+        by_id = {t['id']: t for t in all_targets}
+        current_id = iframe.get('parentId', '')
+        # Walk up (max 10 levels to prevent infinite loops)
+        for _ in range(10):
+            target = by_id.get(current_id)
+            if not target:
+                break
+            if target.get('type') == 'page':
+                return {'targetId': target['id'], 'url': target.get('url', ''),
+                        'title': target.get('title', '')}
+            current_id = target.get('parentId', '')
+        return None
+
+    async def attach_to_frame(self, url_pattern: str,
+                              timeout: float = 10.0) -> str:
+        """Attach to an iframe target whose URL contains url_pattern.
+
+        Polls _get_frames() until a match is found (up to timeout seconds).
+        Stashes the current session as parent so switch_to_parent() can
+        restore it. Raises RuntimeError if multiple matches, timeout, or
+        already in an iframe context (use 'frame top' first).
+        """
+        if self._in_frame:
+            raise RuntimeError(
+                'frame: already in an iframe context. '
+                'Use "frame top" to return to the parent tab first.')
+
+        deadline = time.monotonic() + timeout
+
+        while True:
+            frames = await self._get_frames()
+            matches = [f for f in frames if url_pattern in f['url']]
+
+            if len(matches) > 1:
+                listing = '\n'.join(
+                    f"  {f['url']} (id={f['targetId']})" for f in matches)
+                raise RuntimeError(
+                    f'frame: pattern {url_pattern!r} matches '
+                    f'{len(matches)} iframes:\n{listing}\n'
+                    f'Use a more specific pattern.')
+
+            if len(matches) == 1:
+                frame = matches[0]
+                break
+
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f'frame: no iframe matching {url_pattern!r} found '
+                    f'within {timeout}s')
+
+            await asyncio.sleep(0.3)
+
+        # If no tab session yet (--frame without creating a tab),
+        # find and attach to the iframe's root page first.
+        if self.session_id is None:
+            root = await self._find_root_page(frame)
+            if root:
+                result = await self.send('Target.attachToTarget', {
+                    'targetId': root['targetId'],
+                    'flatten': True,
+                })
+                self.session_id = result['result']['sessionId']
+                self._target_id = root['targetId']
+                self._owns_tab = False
+                print(f'[passe] frame: parent tab {root["url"]}',
+                      file=sys.stderr)
+            else:
+                # Fallback: attach to first available page
+                await self.attach_to_first_page()
+
+        # Stash parent session
+        self._parent_session_id = self.session_id
+        self._parent_target_id = self._target_id
+
+        # Attach to iframe
+        result = await self.send('Target.attachToTarget', {
+            'targetId': frame['targetId'],
+            'flatten': True,
+        })
+        self.session_id = result['result']['sessionId']
+        self._frame_target_id = frame['targetId']
+        self._target_id = frame['targetId']
+        self._in_frame = True
+        self._owns_tab = False
+
+        print(f'[passe] frame: {frame["url"]}', file=sys.stderr)
+        return self.session_id
+
+    async def switch_to_parent(self) -> str:
+        """Switch back to parent tab session from iframe context."""
+        if not self._in_frame or self._parent_session_id is None:
+            raise RuntimeError(
+                'frame top: not currently in an iframe context')
+
+        # Best-effort detach from iframe session
+        iframe_session = self.session_id
+        try:
+            self.session_id = None  # send on browser-level
+            await self.send('Target.detachFromTarget', {
+                'sessionId': iframe_session,
+            }, timeout=5.0)
+        except Exception:
+            pass
+
+        # Restore parent
+        self.session_id = self._parent_session_id
+        self._target_id = self._parent_target_id
+        self._parent_session_id = None
+        self._parent_target_id = None
+        self._frame_target_id = None
+        self._in_frame = False
+
+        print('[passe] frame: switched to parent', file=sys.stderr)
+        return self.session_id
+
+    def _switch_session_for_screenshot(self) -> str | None:
+        """Temporarily switch to parent session for screenshot.
+
+        Page.captureScreenshot is top-level only. Returns the iframe
+        session_id to restore afterwards, or None if not in a frame.
+        """
+        if not self._in_frame:
+            return None
+        iframe_session = self.session_id
+        self.session_id = self._parent_session_id
+        return iframe_session
+
+    def _restore_session_after_screenshot(self, iframe_session: str | None):
+        """Restore iframe session after screenshot."""
+        if iframe_session is not None:
+            self.session_id = iframe_session
 
     async def create_tab(self, foreground: bool = False) -> str:
         """Create a fresh tab and attach to it. Caller owns the tab lifecycle.

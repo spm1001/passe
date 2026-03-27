@@ -134,11 +134,14 @@ _FLASH_JS = """(function() {
 async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
                   keep_on_fail: bool = True, flash: int = None,
-                  foreground: bool = False,
+                  foreground: bool = False, frame: str = None,
                   device: str = None, dpr: float = None):
     """Run a passe script from file, stdin, or inline."""
     # --reuse-tab implies --keep-tab (don't close someone else's tab)
     if reuse_tab:
+        keep_tab = True
+    # --frame implies --keep-tab (we don't own the iframe or its parent)
+    if frame:
         keep_tab = True
 
     # Parse the script text
@@ -170,7 +173,9 @@ async def cmd_run(source: str, inline: str = None,
                 goto_origin = f'{parsed.scheme}://{parsed.netloc}'
                 break
 
-        if reuse_tab:
+        if frame:
+            await client.attach_to_frame(frame)
+        elif reuse_tab:
             await client.attach_to_visible_page(origin=goto_origin)
         else:
             # Auto-replace: close previous tabs at same origin before creating new one.
@@ -630,12 +635,16 @@ async def _warn_if_blank_page(client):
         pass
 
 
-async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None):
+async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None,
+                         frame: str = None):
     """Atomic screenshot of current page. Parses --fast, --viewport, --format, --quality."""
     output, fmt, quality, viewport_only, optimize = parse_screenshot_flags(args)
     async with connect() as (client, conn_info):
-        await client.attach_to_first_page()
-        await _warn_if_blank_page(client)
+        if frame:
+            await client.attach_to_frame(frame)
+        else:
+            await client.attach_to_first_page()
+            await _warn_if_blank_page(client)
         if device:
             await do_device(client, device, dpr_override=dpr)
         info = await do_screenshot(client, output, viewport_only=viewport_only,
@@ -646,11 +655,14 @@ async def cmd_screenshot(args: list[str], device: str = None, dpr: float = None)
         }))
 
 
-async def cmd_eval(expression: str):
+async def cmd_eval(expression: str, frame: str = None):
     """Atomic JS eval on current page."""
     async with connect() as (client, conn_info):
-        await client.attach_to_first_page()
-        await _warn_if_blank_page(client)
+        if frame:
+            await client.attach_to_frame(frame)
+        else:
+            await client.attach_to_first_page()
+            await _warn_if_blank_page(client)
         result = await do_eval(client, expression)
         print(result)
 
@@ -683,6 +695,24 @@ async def cmd_tabs():
                 line += f'  ({title})'
             print(line)
         print(f'\n{len(tabs)} tab(s)', file=sys.stderr)
+
+
+async def cmd_frames():
+    """List all Chrome iframe targets (OOPiFs)."""
+    async with connect() as (client, conn_info):
+        frames = await client.list_frames()
+        if not frames:
+            print('No iframes found', file=sys.stderr)
+            return
+        for i, f in enumerate(frames):
+            url = f['url'] or 'about:blank'
+            title = f['title']
+            parent = f['parent_id'][:8] if f['parent_id'] else '?'
+            line = f'[{i}] {url}  (parent: {parent})'
+            if title and title != url:
+                line += f'  {title}'
+            print(line)
+        print(f'\n{len(frames)} iframe(s)', file=sys.stderr)
 
 
 async def cmd_tabs_close(args: list[str]):

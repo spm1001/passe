@@ -114,6 +114,7 @@ passe run tests/checkout-flow.passe
 - `--device <name>` — device emulation preset applied before script
 - `--dpr <n>` — override device pixel ratio (e.g. `1` for smaller screenshots)
 - `--foreground` — create tab in foreground (visible to human). Needed for `jsaction` sites (Google Groups) and OAuth flows where the page must be visible for event handlers to bind.
+- `--frame <pattern>` — target an iframe by URL substring (OOPiF). Attaches to an existing cross-origin iframe instead of creating a tab. Like `--reuse-tab` for iframes.
 
 ### Verb reference
 
@@ -151,6 +152,10 @@ passe run tests/checkout-flow.passe
 
 **Visibility:**
 - `bring-to-front` — make the tab visible and focused (`Page.bringToFront`). Required for sites that use `jsaction` (e.g. Google Groups) which only bind click handlers to visible elements.
+
+**Context:**
+- `frame <url-pattern> [timeout]` — switch to an iframe (OOPiF) whose URL contains the pattern. Polls for up to `timeout` seconds (default 10). All subsequent verbs (eval, click, type, extract, snapshot) execute in the iframe's JS context. Errors if multiple iframes match — use a more specific pattern. **Screenshot limitation:** `Page.captureScreenshot` is top-level only; when in an iframe context, `screenshot` auto-switches to the parent tab session, captures, and switches back (warning on stderr).
+- `frame top` — switch back to the parent tab context.
 
 **Control:**
 - `wait` — **one verb, three behaviors** based on argument shape:
@@ -233,6 +238,11 @@ The browser has the cookies (including HttpOnly). CSRF tokens come from the DOM.
 11. **`eval-file-to` arg order**: `eval-file-to <out-path> <js-path>` — output first, source second. Consistent with `eval-to <path> <expression>` but opposite to Unix `cp src dest` convention.
 12. **CLI stderr hints**: Passe emits helpful hints on stderr — inline script complexity warnings (>4 verbs, >200 chars), `goto`+`extract` → `fetch` suggestions, "did you mean?" for wrong verb names, about:blank tab warnings, and bare Chrome profile warnings. These are informational. Read and act on them.
 13. **Human-readable summary line**: After every run, stderr shows a one-liner like `[passe] 3 steps, 342ms, /tmp/out.png (234KB)`. This is for quick sanity checks — the structured JSON in stdout is still the primary output.
+14. **`frame` only works with OOPiFs** (out-of-process iframes): Chrome exposes cross-origin iframes as separate CDP targets in `/json/list`. Same-origin iframes don't appear — they share the parent's process and are reachable via `eval` with `document.querySelector('iframe').contentDocument`. If `frame` finds no match, check whether the iframe is same-origin.
+15. **`screenshot` in iframe context**: `Page.captureScreenshot` is a Chrome hard limit — top-level targets only. When you're in a `frame` context, `screenshot` auto-falls back to the parent tab session (warning on stderr). The screenshot shows the full parent page including the iframe visually, not just the iframe's content.
+16. **`frame` timeout**: `frame` polls for the iframe to appear (default 10s). After `goto` to a page that creates iframes dynamically, the iframe target may take a moment to register. If the default timeout isn't enough, pass a second argument: `frame pivot.claude.ai 20`.
+17. **`frame` is not re-entrant**: `frame A; frame B` errors — use `frame top` between them. The session stash is a single slot, not a stack.
+18. **`capture` in iframe context**: Network events from both parent tab and iframe are collected together in the JSONL output. There's no per-session filtering — `capture` records everything Chrome reports on the shared WebSocket.
 
 ## Subcommands (no DSL needed)
 
@@ -260,6 +270,7 @@ passe explain -c 'goto URL; click .btn'      # Dry-run: validate without executi
 passe tabs                                   # List all Chrome tabs
 passe tabs close --all                       # Close all tabs except one
 passe tabs close --matching itv              # Close tabs matching URL pattern
+passe frames                                 # List iframe targets (OOPiFs)
 ```
 
 `look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only. `tabs` queries Chrome directly via CDP — no state file.
