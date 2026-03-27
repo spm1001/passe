@@ -18,7 +18,7 @@ import sys
 from passe.connection import set_cdp_override
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices,
-                            cmd_tabs, cmd_tabs_close, cmd_frames)
+                            cmd_tabs, cmd_tabs_close)
 from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
 from passe.log_lifecycle import (cmd_log_start, cmd_log_stop, cmd_log_status,
                                  cmd_log_pause, cmd_log_unpause)
@@ -77,9 +77,9 @@ Commands:
   passe explain -c 'verbs...'     Dry-run: validate script without executing
   passe devices                   List available device presets
   passe tabs                      List open Chrome tabs
+  passe tabs --frames             Include iframe targets (OOPiFs)
   passe tabs close --all          Close all tabs except one
   passe tabs close --matching P   Close tabs matching URL pattern
-  passe frames                    List iframe targets (OOPiFs)
   passe log start [--cdp URL]     Start capture daemon
   passe log stop                  Stop capture daemon
   passe log status                Daemon health and log stats
@@ -417,12 +417,12 @@ def main():
                   f'tail, list, show, or clear.',
                   file=sys.stderr)
             sys.exit(1)
-    elif cmd == 'frames':
-        _run(cmd_frames())
     elif cmd == 'tabs':
         tabs_args = all_args[1:]
+        show_frames = '--frames' in tabs_args
+        tabs_args = [a for a in tabs_args if a != '--frames']
         if not tabs_args:
-            _run(cmd_tabs())
+            _run(cmd_tabs(show_frames=show_frames))
         elif tabs_args[0] == 'close':
             _run(cmd_tabs_close(tabs_args[1:]))
         else:

@@ -268,9 +268,9 @@ passe eval "document.title"                  # Quick JS eval on current page
 passe explain -c 'goto URL; click .btn'      # Dry-run: validate without executing
 
 passe tabs                                   # List all Chrome tabs
+passe tabs --frames                          # Include iframe targets (OOPiFs)
 passe tabs close --all                       # Close all tabs except one
 passe tabs close --matching itv              # Close tabs matching URL pattern
-passe frames                                 # List iframe targets (OOPiFs)
 ```
 
 `look`, `check`, `capture`, and `fetch` create+destroy their own tab. `screenshot` and `eval` attach to the first existing tab — no navigation. `explain` needs no Chrome connection — it validates syntax only. `tabs` queries Chrome directly via CDP — no state file.

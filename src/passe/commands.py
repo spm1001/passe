@@ -680,11 +680,11 @@ def cmd_devices():
         print(f'{name:<16} {size:>11}  {dpr:>6}  {kind:<7}')
 
 
-async def cmd_tabs():
-    """List all Chrome tabs."""
+async def cmd_tabs(show_frames: bool = False):
+    """List all Chrome tabs, optionally including iframe targets."""
     async with connect() as (client, conn_info):
         tabs = await client.list_tabs()
-        if not tabs:
+        if not tabs and not show_frames:
             print('No tabs open', file=sys.stderr)
             return
         for i, tab in enumerate(tabs):
@@ -694,25 +694,24 @@ async def cmd_tabs():
             if title and title != url:
                 line += f'  ({title})'
             print(line)
-        print(f'\n{len(tabs)} tab(s)', file=sys.stderr)
-
-
-async def cmd_frames():
-    """List all Chrome iframe targets (OOPiFs)."""
-    async with connect() as (client, conn_info):
-        frames = await client.list_frames()
-        if not frames:
-            print('No iframes found', file=sys.stderr)
-            return
-        for i, f in enumerate(frames):
-            url = f['url'] or 'about:blank'
-            title = f['title']
-            parent = f['parent_id'][:8] if f['parent_id'] else '?'
-            line = f'[{i}] {url}  (parent: {parent})'
-            if title and title != url:
-                line += f'  {title}'
-            print(line)
-        print(f'\n{len(frames)} iframe(s)', file=sys.stderr)
+        if show_frames:
+            frames = await client.list_frames()
+            if frames:
+                print(file=sys.stderr)
+                for j, f in enumerate(frames):
+                    url = f['url'] or 'about:blank'
+                    title = f['title']
+                    parent = f['parent_id'][:8] if f['parent_id'] else '?'
+                    line = f'  iframe [{j}] {url}  (parent: {parent})'
+                    if title and title != url:
+                        line += f'  {title}'
+                    print(line)
+                print(f'\n{len(tabs)} tab(s), {len(frames)} iframe(s)',
+                      file=sys.stderr)
+            else:
+                print(f'\n{len(tabs)} tab(s), 0 iframes', file=sys.stderr)
+        else:
+            print(f'\n{len(tabs)} tab(s)', file=sys.stderr)
 
 
 async def cmd_tabs_close(args: list[str]):
