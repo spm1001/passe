@@ -1,6 +1,6 @@
 {
   "name": "passe",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Fast browser automation via Chrome DevTools Protocol. Requires: passe CLI (uv tool install passe), Chrome with CDP",
   "author": {
     "name": "Sameer Modha",
@@ -14,5 +14,22 @@
     "cdp",
     "chrome",
     "testing"
-  ]
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/ensure-passe.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
+      }
+    ]
+  }
 }
