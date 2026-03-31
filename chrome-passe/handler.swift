@@ -92,29 +92,35 @@ class ChromePasseDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func launchChrome(urls: [URL]) {
-        // Launch Chrome via NSWorkspace — Chrome gets its own TCC coalition
-        // so microphone, camera, screen recording, etc. all work without
-        // needing usage descriptions in Chrome Passe's Info.plist.
-        let config = NSWorkspace.OpenConfiguration()
-        config.arguments = [
+        // Launch Chrome via `open -a` — goes through Launch Services so
+        // Chrome gets proper TCC context (camera, mic, screen recording)
+        // without needing usage descriptions in Chrome Passe's Info.plist.
+        //
+        // NSWorkspace.openApplication was used previously but it causes
+        // Chrome 146+ to auto-pause debugger; statements in cross-origin
+        // popups when --remote-debugging-port is active, breaking Meet
+        // screenshare and other popup-based flows. `open -a` uses Launch
+        // Services without triggering this behaviour.
+        var args = [
+            "/usr/bin/open", "-a", Self.chromeApp.path,
+            "--args",
             "--remote-debugging-port=9222",
             "--remote-allow-origins=*",
             "--user-data-dir=\(Self.profile)",
             "--no-default-browser-check",
+            "--disable-infobars",
         ]
-
-        if urls.isEmpty {
-            NSWorkspace.shared.openApplication(
-                at: Self.chromeApp,
-                configuration: config
-            )
-        } else {
-            NSWorkspace.shared.open(
-                urls,
-                withApplicationAt: Self.chromeApp,
-                configuration: config
-            )
+        for url in urls {
+            args.append(url.absoluteString)
         }
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        proc.arguments = Array(args.dropFirst()) // drop the executable itself
+        proc.standardOutput = FileHandle.nullDevice
+        proc.standardError = FileHandle.nullDevice
+        try? proc.run()
+
         launchedByUs = true
     }
 

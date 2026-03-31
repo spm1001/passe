@@ -31,7 +31,7 @@ The primary executable. A compiled Swift binary (~140 lines, source in `passe/ch
 
 **Why native?** Bash can't receive macOS Apple Events (`odoc` for files, `GURL` for URLs). When Chrome Passe is the default browser and you double-click an HTML file or click a link in another app, macOS sends an Apple Event to the running Chrome Passe.app. A bash executable silently drops it — the URL never opens. The native handler receives these events and forwards them to Chrome.
 
-**Launch method: NSWorkspace.** Chrome is launched via `NSWorkspace.shared.openApplication()` rather than `Process()` or bash. This is critical — when a wrapper app spawns Chrome via `Process()`, Chrome inherits the wrapper's TCC coalition. macOS then checks the *wrapper's* Info.plist for privacy usage descriptions (microphone, camera, etc.), and crashes Chrome with SIGABRT when they're missing. NSWorkspace launches Chrome through LaunchServices, giving it its own coalition and its own TCC grants. Trade-off: Chrome gets its own dock icon (two icons total). Worth it — a browser that crashes on Google Meet is useless.
+**Launch method: `open -a` via Process().** Chrome is launched via `/usr/bin/open -a` which goes through Launch Services, giving Chrome its own TCC coalition and grants (camera, mic, screen recording all work). Previously used `NSWorkspace.shared.openApplication()` but this caused Chrome 146+ to auto-pause `debugger;` statements in cross-origin popups when `--remote-debugging-port` is active — breaking Meet screenshare and other popup-based flows. The `open -a` path uses Launch Services without triggering this behaviour.
 
 **What it does:**
 
@@ -40,10 +40,10 @@ The primary executable. A compiled Swift binary (~140 lines, source in `passe/ch
 | `application:openFiles:` | Double-click .html in Finder, "Open With" | Opens file URLs in Chrome via NSWorkspace |
 | `kAEGetURL` | Click URL in Slack, Mail, Notes, etc. | Opens URL in Chrome via NSWorkspace |
 | `applicationShouldHandleReopen:` | Click Chrome Passe in Dock | Brings Chrome window to front |
-| `applicationDidFinishLaunching:` | First launch | Starts Chrome with debug flags via NSWorkspace |
+| `applicationDidFinishLaunching:` | First launch | Starts Chrome with debug flags via `open -a` |
 | `on idle` (5s timer) | Ongoing | Quits handler when Chrome exits |
 
-**Re-entry detection** uses Chrome's `SingletonLock` (a symlink encoding the PID). When Chrome is alive, URLs are opened via `NSWorkspace.shared.open(urls, withApplicationAt:)` — Chrome's singleton IPC delivers them to the existing instance. When the lock is stale or absent, Chrome is launched with full debug flags.
+**Re-entry detection** uses Chrome's `SingletonLock` (a symlink encoding the PID). When Chrome is alive, URLs are opened via `NSWorkspace.shared.open(urls, withApplicationAt:)` — Chrome's singleton IPC delivers them to the existing instance (this path is fine — it sends URLs to an already-running Chrome, not launching it). When the lock is stale or absent, Chrome is launched with full debug flags.
 
 **First-launch race:** When Chrome Passe launches and immediately receives a file open event, Chrome may not have established its `SingletonLock` yet. The `launchedByUs` flag handles this — if we just started Chrome, URLs are handed off regardless of lock state.
 
@@ -55,7 +55,7 @@ make            # Compiles universal binary (arm64 + x86_64), ad-hoc signs
 make install    # Creates app bundle, writes Info.plist, copies binary + icon, re-registers
 ```
 
-Key Chrome flags passed via `NSWorkspace.OpenConfiguration.arguments`:
+Key Chrome flags passed via `open -a --args`:
 
 | Flag | Purpose |
 |------|---------|
