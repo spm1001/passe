@@ -15,3 +15,4 @@ Auto-loaded via `~/.claude/rules/passe.md`.
 - Launched via `~/Applications/Chrome Passe.app`
 - Authenticated pages: `webctl` with default profile
 - Browser automation: `passe` (CDP CLI). Compound ops in one Bash call.
+- **Connection trouble?** Run `passe status` first — it reports structured diagnostics. Don't say "passe is broken" — diagnose the connection.
