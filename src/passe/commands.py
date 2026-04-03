@@ -700,7 +700,7 @@ def cmd_status():
         fields['alternatives'] = '; '.join(exc.alternatives)
 
     for key, val in fields.items():
-        print(f'[passe:status] {key}={val}')
+        print(f'[passe:status] {key}={val}', file=sys.stderr)
 
 
 def cmd_devices():

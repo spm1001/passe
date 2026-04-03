@@ -8,8 +8,8 @@ Passe Claude Usability Eval.
 Tests whether Claude correctly uses Passe when given browser tasks.
 
 Two modes:
-  --api     Use Anthropic API (default). Fast, parallel-safe, costs tokens.
-  --local   Use ardoise + local Claude. Free, slower, uses CC license.
+  --local   Use ardoise + local Claude (default). Free, uses CC license.
+  --api     Use Anthropic API. Fast, parallel-safe, costs tokens.
 
 Usage:
     uv run --script tests/eval/run_eval.py                    # API mode
@@ -250,10 +250,10 @@ def run_scenario_local(
 def main():
     parser = argparse.ArgumentParser(description="Passe Claude Usability Eval")
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument("--api", action="store_true", default=True,
-                      help="Use Anthropic API (default)")
-    mode.add_argument("--local", action="store_true",
-                      help="Use ardoise + local Claude (free)")
+    mode.add_argument("--api", action="store_true",
+                      help="Use Anthropic API (costs tokens)")
+    mode.add_argument("--local", action="store_true", default=True,
+                      help="Use ardoise + local Claude (default, free)")
     parser.add_argument("--model", default="claude-sonnet-4-6",
                         help="Model to test (default: claude-sonnet-4-6)")
     parser.add_argument("--category", help="Run only scenarios in this category")
