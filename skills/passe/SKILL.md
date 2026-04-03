@@ -45,6 +45,7 @@ These are the most frequent errors from real passe usage across ~455 invocations
 | `passe run -c 'goto URL; click sel; type sel text; wait 0.5; screenshot /tmp/out.png; read /tmp/content.md'` | Monster inline one-liners are unreadable and error-prone. The CLI warns at >4 verbs or >200 chars. | Use heredoc for 5+ verbs. |
 | Chasing "doubled output" from passe | This is a Claude Code Bash tool quirk — non-zero exit codes replay output. Not a passe bug. | Check the exit code. If passe failed, read the error. Don't debug the duplication. |
 | `scroll down 500` | Passe uses `scroll <x> <y>` (pixel coordinates), not natural language directions. | `scroll 0 500` |
+| Saying "passe is broken" on connection refused | Connection refused means Chrome is unreachable, not that passe is broken. Claude gives up instead of diagnosing. | Run `passe status` first. If unreachable: use `--cdp localhost:9222` for local headless Chrome, or check Mac is awake. |
 
 ## DO NOT
 
@@ -67,7 +68,19 @@ Passe connects to Chrome on port 9222. Two modes:
 
 Use `--cdp http://host:9222` to target a specific Chrome instance per-invocation (overrides `PASSE_CDP` env var). Default: localhost:9222.
 
-**Kube → Mac connection:** Mac exposes Chrome Passe via `tailscale serve --bg --tcp 9222 tcp://localhost:9222`. Kube has `PASSE_CDP=http://<mac-tailscale-ip>:9222` in `.bashrc`. Passe auto-rewrites WebSocket URLs. **If it fails:** check for stale Chrome processes on Mac (`lsof -i :9222`) — old PIDs hogging port 9222 is the most common cause.
+**Hezza → Mac connection:** Mac exposes Chrome Passe via `tailscale serve --bg --tcp 9222 tcp://localhost:9222`. Hezza has `PASSE_CDP=http://<mac-tailscale-ip>:9222` in `.bashrc`. Passe auto-rewrites WebSocket URLs.
+
+**Connection troubleshooting:** Run `passe status` first — it probes the CDP endpoint and reports structured diagnostics:
+
+```
+[passe:status] cdp_endpoint=http://100.66.153.39:9222
+[passe:status] remote=True
+[passe:status] reachable=False
+[passe:status] reason=Cannot connect to Chrome: <urlopen error timed out>
+[passe:status] alternatives=Check that Chrome is running; Use --cdp localhost:9222 for local headless Chrome
+```
+
+When Chrome is unreachable, passe emits `[passe:connection]` diagnostics on stderr with `endpoint`, `reason`, and `alternatives` fields. **Do not say "passe is broken"** — diagnose the connection. Common causes: Mac is sleeping, stale Chrome process on port 9222 (`lsof -i :9222`), wrong PASSE_CDP value. Alternatives: `--cdp localhost:9222` for local headless Chrome, or wait for the Mac to wake up.
 
 ## Invocation
 
