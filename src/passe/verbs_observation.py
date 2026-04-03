@@ -824,3 +824,195 @@ async def do_watch(client: CDPClient, path: str, fast: bool = True,
         print(json.dumps({
             'event': 'watch_stopped', 'total_captures': capture_count,
         }), file=sys.stderr)
+
+
+# ── Accessibility tree verbs ────────────────────────────
+
+
+def _ax_node_summary(node: dict) -> dict | None:
+    """Extract role/name/value from a CDP AXNode, skipping ignored nodes."""
+    if node.get('ignored', False):
+        return None
+    role = node.get('role', {}).get('value', '')
+    summary = {'role': role}
+    name = node.get('name', {}).get('value', '')
+    if name:
+        summary['name'] = name
+    value = node.get('value', {}).get('value', '')
+    if value:
+        summary['value'] = value
+    # Expose nodeId for cross-referencing
+    summary['nodeId'] = node.get('nodeId', '')
+    return summary
+
+
+def _is_transparent(node: dict) -> bool:
+    """True for structural-only nodes that add noise (role=none, generic)."""
+    role = node.get('role', {}).get('value', '')
+    return role in ('none', 'generic') and not node.get('name', {}).get('value', '')
+
+
+def _build_ax_tree(nodes: list[dict]) -> list[dict]:
+    """Rebuild a tree from CDP's flat AXNode list.
+
+    CDP may provide parentId, childIds, or both. We use parentId as the
+    primary signal (always present in getFullAXTree output), falling back
+    to childIds when parentId is absent.
+
+    Transparent nodes (role=none/generic with no name) are collapsed: their
+    children get reparented to the nearest non-transparent ancestor.
+    """
+    # Track which raw nodes are transparent (for reparenting)
+    transparent = {n['nodeId'] for n in nodes if _is_transparent(n)}
+
+    by_id = {}
+    for node in nodes:
+        summary = _ax_node_summary(node)
+        if summary is None:
+            continue
+        summary['children'] = []
+        by_id[node['nodeId']] = summary
+
+    # Build parentId lookup
+    parent_map = {}
+    for node in nodes:
+        pid = node.get('parentId')
+        if pid is not None:
+            parent_map[node['nodeId']] = pid
+
+    def _find_visible_parent(nid):
+        """Walk up parentId chain to find the nearest non-transparent ancestor."""
+        pid = parent_map.get(nid)
+        while pid and pid in transparent:
+            pid = parent_map.get(pid)
+        return pid
+
+    roots = []
+    for node in nodes:
+        nid = node['nodeId']
+        if nid not in by_id or nid in transparent:
+            continue
+        visible_parent = _find_visible_parent(nid)
+        if visible_parent and visible_parent in by_id:
+            by_id[visible_parent]['children'].append(by_id[nid])
+        else:
+            roots.append(by_id[nid])
+
+    # Fallback: if no parentId wiring happened (e.g. getPartialAXTree),
+    # try childIds instead
+    if len(roots) == len(by_id) - len(transparent) and len(roots) > 1:
+        for nid in by_id:
+            if nid not in transparent:
+                by_id[nid]['children'] = []
+        roots = []
+        all_children = set()
+        for node in nodes:
+            nid = node['nodeId']
+            if nid not in by_id or nid in transparent:
+                continue
+            for cid in node.get('childIds', []):
+                if cid in by_id and cid not in transparent:
+                    by_id[nid]['children'].append(by_id[cid])
+                    all_children.add(cid)
+        for nid, summary in by_id.items():
+            if nid not in all_children and nid not in transparent:
+                roots.append(summary)
+
+    return roots
+
+
+def _prune_empty_children(tree: list[dict]) -> list[dict]:
+    """Remove empty children lists for cleaner output."""
+    for node in tree:
+        if node.get('children'):
+            node['children'] = _prune_empty_children(node['children'])
+        else:
+            node.pop('children', None)
+    return tree
+
+
+MAX_AX_NODES = 1500  # cap output to avoid blowing context on heavy pages
+
+
+async def do_ax_tree(client: CDPClient, depth: int = None) -> str:
+    """Return the full accessibility tree as structured JSON.
+
+    depth: max tree depth to fetch (None = unlimited). Passed to CDP's
+    getFullAXTree which truncates server-side — cheaper than post-filtering.
+    """
+    params = {}
+    if depth is not None:
+        params['depth'] = depth
+    result = await client.send('Accessibility.getFullAXTree', params,
+                               timeout=30.0)
+    nodes = result.get('result', {}).get('nodes', [])
+    truncated = len(nodes) > MAX_AX_NODES
+    if truncated:
+        nodes = nodes[:MAX_AX_NODES]
+    tree = _build_ax_tree(nodes)
+    tree = _prune_empty_children(tree)
+    out = json.dumps(tree, indent=2)
+    if truncated:
+        print(f'[ax-tree] truncated to {MAX_AX_NODES} nodes '
+              f'(use --depth N to limit)', file=sys.stderr)
+    return out
+
+
+async def do_ax_find(client: CDPClient, role: str = None,
+                     name: str = None) -> str:
+    """Find accessibility nodes matching role and/or name filters.
+
+    Fetches the full tree and filters client-side. CDP's queryAXTree
+    is unreliable (hangs/times out on some Chrome versions).
+    At least one of role or name must be provided.
+    """
+    if not role and not name:
+        return json.dumps({'error': 'ax-find requires --role and/or --name'})
+
+    result = await client.send('Accessibility.getFullAXTree', {},
+                               timeout=30.0)
+    nodes = result.get('result', {}).get('nodes', [])
+    matches = []
+    for node in nodes:
+        if _is_transparent(node) or node.get('ignored', False):
+            continue
+        node_role = node.get('role', {}).get('value', '')
+        node_name = node.get('name', {}).get('value', '')
+        if role and role.lower() != node_role.lower():
+            continue
+        if name and name.lower() not in node_name.lower():
+            continue
+        summary = _ax_node_summary(node)
+        if summary:
+            backend_id = node.get('backendDOMNodeId')
+            if backend_id:
+                summary['backendDOMNodeId'] = backend_id
+            matches.append(summary)
+    return json.dumps(matches, indent=2)
+
+
+async def do_ax_node(client: CDPClient, selector: str) -> str:
+    """Return the accessibility subtree for a DOM element found by CSS selector."""
+    # Resolve selector to DOM nodeId
+    doc = await client.send('DOM.getDocument')
+    root_id = doc['result']['root']['nodeId']
+    found = await client.send('DOM.querySelector', {
+        'nodeId': root_id,
+        'selector': selector,
+    })
+    node_id = found.get('result', {}).get('nodeId', 0)
+    if not node_id:
+        return json.dumps({'error': f'No element matches selector: {selector}'})
+
+    # Resolve to backendNodeId for the Accessibility domain
+    attrs = await client.send('DOM.describeNode', {'nodeId': node_id})
+    backend_id = attrs['result']['node']['backendNodeId']
+
+    result = await client.send('Accessibility.getPartialAXTree', {
+        'backendNodeId': backend_id,
+        'fetchRelatives': True,
+    })
+    nodes = result.get('result', {}).get('nodes', [])
+    tree = _build_ax_tree(nodes)
+    tree = _prune_empty_children(tree)
+    return json.dumps(tree, indent=2)

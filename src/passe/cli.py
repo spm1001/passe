@@ -40,6 +40,7 @@ from passe.verbs import (  # noqa: F401
     do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
     do_assert, do_watch, do_frame, _check_thin_read,
+    do_ax_tree, do_ax_find, do_ax_node,
 )
 from passe.runner import run_script, _build_capture_summary, _write_capture_jsonl  # noqa: F401
 

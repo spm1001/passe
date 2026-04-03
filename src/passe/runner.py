@@ -21,6 +21,7 @@ from passe.verbs import (
     do_device, do_viewport, do_wait_for, do_wait_stable,
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
     do_assert, do_watch, do_frame,
+    do_ax_tree, do_ax_find, do_ax_node,
 )
 
 
@@ -441,6 +442,46 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['target'] = 'top'
                 else:
                     step_info['frame_url'] = args[0]
+            elif verb == 'ax-tree':
+                tree_args = list(args)
+                depth = None
+                if '--depth' in tree_args:
+                    idx = tree_args.index('--depth')
+                    if idx + 1 < len(tree_args):
+                        depth = int(tree_args[idx + 1])
+                        del tree_args[idx:idx + 2]
+                text = await do_ax_tree(client, depth=depth)
+                word_count = len(text.split())
+                if word_count <= CONTENT_INLINE_THRESHOLD:
+                    step_info['content'] = text
+                else:
+                    step_info['result'] = text[:200]
+                step_info['node_count'] = text.count('"role"')
+            elif verb == 'ax-find':
+                find_args = list(args)
+                role = name_filter = None
+                if '--role' in find_args:
+                    idx = find_args.index('--role')
+                    if idx + 1 < len(find_args):
+                        role = find_args[idx + 1]
+                        del find_args[idx:idx + 2]
+                if '--name' in find_args:
+                    idx = find_args.index('--name')
+                    if idx + 1 < len(find_args):
+                        name_filter = find_args[idx + 1]
+                        del find_args[idx:idx + 2]
+                # Positional: ax-find ROLE or ax-find ROLE NAME
+                if not role and find_args:
+                    role = find_args.pop(0)
+                if not name_filter and find_args:
+                    name_filter = find_args.pop(0)
+                text = await do_ax_find(client, role=role, name=name_filter)
+                step_info['content'] = text
+                step_info['match_count'] = text.count('"role"')
+            elif verb == 'ax-node':
+                selector = args[0] if args else 'body'
+                text = await do_ax_node(client, selector)
+                step_info['content'] = text
             elif verb == 'bring-to-front':
                 await client.send('Page.bringToFront')
             elif verb == 'capture':

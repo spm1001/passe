@@ -13,6 +13,7 @@ KNOWN_VERBS = {
     'capture', 'viewport', 'device', 'watch', 'wait', 'wait-for', 'wait-idle',
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log', 'bring-to-front', 'frame',
+    'ax-tree', 'ax-find', 'ax-node',
 }
 
 # Verbs that trigger auto-wait in the next read/fetch step.
