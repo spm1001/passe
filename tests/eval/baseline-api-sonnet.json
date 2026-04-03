@@ -1,0 +1,345 @@
+{
+  "model": "claude-sonnet-4-6",
+  "total": 20,
+  "passed": 19,
+  "failed": 1,
+  "by_category": {
+    "connection_error": {
+      "total": 4,
+      "passed": 3
+    },
+    "dsl_hygiene": {
+      "total": 3,
+      "passed": 3
+    },
+    "extraction": {
+      "total": 2,
+      "passed": 2
+    },
+    "network": {
+      "total": 2,
+      "passed": 2
+    },
+    "scout_pattern": {
+      "total": 2,
+      "passed": 2
+    },
+    "tab_lifecycle": {
+      "total": 2,
+      "passed": 2
+    },
+    "tool_choice": {
+      "total": 5,
+      "passed": 5
+    }
+  },
+  "results": [
+    {
+      "scenario_id": "tc-01",
+      "category": "tool_choice",
+      "passed": true,
+      "matched_expects": [
+        "passe fetch"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 2234.372560866177,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16305,
+      "tokens_out": 24
+    },
+    {
+      "scenario_id": "tc-02",
+      "category": "tool_choice",
+      "passed": true,
+      "matched_expects": [
+        "mise fetch",
+        "mise"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1774.7759250923991,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16311,
+      "tokens_out": 29
+    },
+    {
+      "scenario_id": "tc-03",
+      "category": "tool_choice",
+      "passed": true,
+      "matched_expects": [
+        "passe look"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1734.3827299773693,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16298,
+      "tokens_out": 28
+    },
+    {
+      "scenario_id": "tc-04",
+      "category": "tool_choice",
+      "passed": true,
+      "matched_expects": [
+        "passe capture"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 8150.697571923956,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16300,
+      "tokens_out": 285
+    },
+    {
+      "scenario_id": "tc-05",
+      "category": "tool_choice",
+      "passed": true,
+      "matched_expects": [
+        "mise"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1693.717892980203,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16308,
+      "tokens_out": 30
+    },
+    {
+      "scenario_id": "dh-01",
+      "category": "dsl_hygiene",
+      "passed": true,
+      "matched_expects": [
+        "<<'EOF'",
+        "heredoc"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 12462.093756068498,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16332,
+      "tokens_out": 499
+    },
+    {
+      "scenario_id": "dh-02",
+      "category": "dsl_hygiene",
+      "passed": true,
+      "matched_expects": [
+        "passe fetch",
+        "fetch https://example.com"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1284.9593348801136,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16296,
+      "tokens_out": 16
+    },
+    {
+      "scenario_id": "dh-03",
+      "category": "dsl_hygiene",
+      "passed": true,
+      "matched_expects": [
+        "passe fetch https://example.com /tmp/content.md",
+        "fetch https://example.com /tmp/content.md"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1601.17121017538,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16303,
+      "tokens_out": 22
+    },
+    {
+      "scenario_id": "tl-01",
+      "category": "tab_lifecycle",
+      "passed": true,
+      "matched_expects": [
+        "passe run"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1917.640807107091,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16305,
+      "tokens_out": 50
+    },
+    {
+      "scenario_id": "tl-02",
+      "category": "tab_lifecycle",
+      "passed": true,
+      "matched_expects": [
+        "passe run"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1894.0701019018888,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16303,
+      "tokens_out": 35
+    },
+    {
+      "scenario_id": "ce-01",
+      "category": "connection_error",
+      "passed": true,
+      "matched_expects": [
+        "Chrome",
+        "running",
+        "lsof",
+        "9222",
+        "stale",
+        "closed",
+        "sleeping"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 10576.390092028305,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16308,
+      "tokens_out": 558
+    },
+    {
+      "scenario_id": "ce-02",
+      "category": "connection_error",
+      "passed": true,
+      "matched_expects": [
+        "localhost",
+        "local"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 2630.3113070316613,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16307,
+      "tokens_out": 37
+    },
+    {
+      "scenario_id": "ce-03",
+      "category": "connection_error",
+      "passed": false,
+      "matched_expects": [
+        "Mac",
+        "sleeping",
+        "--cdp",
+        "localhost",
+        "headless",
+        "local"
+      ],
+      "matched_rejects": [
+        "try curl"
+      ],
+      "missing_expects": [],
+      "duration_ms": 8467.47887507081,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16325,
+      "tokens_out": 412
+    },
+    {
+      "scenario_id": "ce-04",
+      "category": "connection_error",
+      "passed": true,
+      "matched_expects": [
+        "localhost",
+        "PASSE_CDP",
+        "local",
+        "headless",
+        "chromium"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 4351.915264036506,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16319,
+      "tokens_out": 203
+    },
+    {
+      "scenario_id": "sp-01",
+      "category": "scout_pattern",
+      "passed": true,
+      "matched_expects": [
+        "snapshot",
+        "scout",
+        "discover"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 8014.566415920854,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16305,
+      "tokens_out": 311
+    },
+    {
+      "scenario_id": "sp-02",
+      "category": "scout_pattern",
+      "passed": true,
+      "matched_expects": [
+        "snapshot"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 2605.8224390726537,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16297,
+      "tokens_out": 52
+    },
+    {
+      "scenario_id": "ex-01",
+      "category": "extraction",
+      "passed": true,
+      "matched_expects": [
+        "passe fetch"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1479.2423399630934,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16299,
+      "tokens_out": 22
+    },
+    {
+      "scenario_id": "ex-02",
+      "category": "extraction",
+      "passed": true,
+      "matched_expects": [
+        "passe fetch",
+        "apple"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1626.1625299230218,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16301,
+      "tokens_out": 24
+    },
+    {
+      "scenario_id": "nw-01",
+      "category": "network",
+      "passed": true,
+      "matched_expects": [
+        "capture",
+        "jsonl"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 12345.02092609182,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16311,
+      "tokens_out": 522
+    },
+    {
+      "scenario_id": "nw-02",
+      "category": "network",
+      "passed": true,
+      "matched_expects": [
+        "passe log start",
+        "log start"
+      ],
+      "matched_rejects": [],
+      "missing_expects": [],
+      "duration_ms": 1329.7415701672435,
+      "model": "claude-sonnet-4-6",
+      "tokens_in": 16293,
+      "tokens_out": 17
+    }
+  ]
+}
