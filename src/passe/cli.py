@@ -18,7 +18,7 @@ import sys
 from passe.connection import set_cdp_override, ChromeConnectionError
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices,
-                            cmd_tabs, cmd_tabs_close)
+                            cmd_status, cmd_tabs, cmd_tabs_close)
 from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
 from passe.log_lifecycle import (cmd_log_start, cmd_log_stop, cmd_log_status,
                                  cmd_log_pause, cmd_log_unpause)
@@ -75,6 +75,7 @@ Commands:
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
   passe explain -c 'verbs...'     Dry-run: validate script without executing
+  passe status                    Chrome connection diagnostics
   passe devices                   List available device presets
   passe tabs                      List open Chrome tabs
   passe tabs --frames             Include iframe targets (OOPiFs)
@@ -386,6 +387,8 @@ def main():
         _run(cmd_eval(' '.join(all_args[1:]), frame=frame_pattern))
     elif cmd == 'devices':
         cmd_devices()
+    elif cmd == 'status':
+        cmd_status()
     elif cmd == 'log':
         log_args = all_args[1:]
         if not log_args or log_args[0] in ('--help', '-h'):

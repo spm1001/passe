@@ -9,7 +9,7 @@ def _hints_enabled():
     """Check if stderr hints are enabled (PASSE_HINTS != '0')."""
     return os.environ.get('PASSE_HINTS', '1') != '0'
 
-from passe.connection import connect
+from passe.connection import connect, ChromeConnectionError
 from passe.parser import (
     CONTENT_INLINE_THRESHOLD, KNOWN_VERBS, VERB_SUGGESTIONS,
     parse_screenshot_flags, parse_script,
@@ -665,6 +665,42 @@ async def cmd_eval(expression: str, frame: str = None):
             await _warn_if_blank_page(client)
         result = await do_eval(client, expression)
         print(result)
+
+
+def cmd_status():
+    """Probe Chrome connection and report status for Claude consumption."""
+    import urllib.request
+    from passe.connection import _cdp_base_url, _is_loopback, discover_chrome
+
+    base_url = _cdp_base_url()
+    is_remote = not _is_loopback(base_url)
+
+    fields = {
+        'cdp_endpoint': base_url,
+        'remote': is_remote,
+        'reachable': False,
+    }
+
+    try:
+        _, info = discover_chrome()
+        fields['reachable'] = True
+        fields['chrome_version'] = info.get('browser', 'unknown')
+
+        # Get tab count via lightweight HTTP (no WebSocket needed)
+        try:
+            with urllib.request.urlopen(f'{base_url}/json/list', timeout=3) as resp:
+                tabs = json.loads(resp.read())
+                page_tabs = [t for t in tabs if t.get('type') == 'page']
+                fields['tabs_open'] = len(page_tabs)
+        except Exception:
+            fields['tabs_open'] = '?'
+
+    except ChromeConnectionError as exc:
+        fields['reason'] = exc.reason
+        fields['alternatives'] = '; '.join(exc.alternatives)
+
+    for key, val in fields.items():
+        print(f'[passe:status] {key}={val}')
 
 
 def cmd_devices():
