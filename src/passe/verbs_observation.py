@@ -933,12 +933,38 @@ def _prune_empty_children(tree: list[dict]) -> list[dict]:
 
 MAX_AX_NODES = 1500  # cap output to avoid blowing context on heavy pages
 
+# Roles stripped by --compact (leaf noise that bloats context)
+_COMPACT_STRIP_ROLES = {'StaticText', 'InlineTextBox'}
 
-async def do_ax_tree(client: CDPClient, depth: int = None) -> str:
+
+def _compact_tree(tree: list[dict]) -> list[dict]:
+    """Strip noise leaf nodes (StaticText, InlineTextBox, unnamed generic/none).
+
+    Only removes leaves — nodes with children are kept so structure isn't lost.
+    """
+    compacted = []
+    for node in tree:
+        children = node.get('children', [])
+        if children:
+            node['children'] = _compact_tree(children)
+            compacted.append(node)
+        else:
+            role = node.get('role', '')
+            if role in _COMPACT_STRIP_ROLES:
+                continue
+            if role in ('none', 'generic') and not node.get('name'):
+                continue
+            compacted.append(node)
+    return compacted
+
+
+async def do_ax_tree(client: CDPClient, depth: int = None,
+                     compact: bool = False) -> str:
     """Return the full accessibility tree as structured JSON.
 
     depth: max tree depth to fetch (None = unlimited). Passed to CDP's
     getFullAXTree which truncates server-side — cheaper than post-filtering.
+    compact: strip StaticText/InlineTextBox leaf nodes for a cleaner skeleton.
     """
     params = {}
     if depth is not None:
@@ -950,6 +976,8 @@ async def do_ax_tree(client: CDPClient, depth: int = None) -> str:
     if truncated:
         nodes = nodes[:MAX_AX_NODES]
     tree = _build_ax_tree(nodes)
+    if compact:
+        tree = _compact_tree(tree)
     tree = _prune_empty_children(tree)
     out = json.dumps(tree, indent=2)
     if truncated:

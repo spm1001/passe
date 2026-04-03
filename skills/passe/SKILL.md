@@ -89,6 +89,9 @@ passe run -c 'goto https://site.com; ax-tree'
 # Limit tree depth on heavy pages
 passe run -c 'goto https://site.com; ax-tree --depth 3'
 
+# Semantic skeleton only — strips StaticText/InlineTextBox noise
+passe run -c 'goto https://site.com; ax-tree --compact'
+
 # Find specific elements by role or name
 passe run -c 'goto https://site.com; ax-find button'
 passe run -c 'goto https://site.com; ax-find --role link --name Settings'
@@ -328,7 +331,7 @@ passe run --foreground -c '...'
 `click <sel-or-text>`, `type <sel> <text>`, `fill <sel> <val>`, `select <sel> <val>`, `press <key>`, `hover <sel>`, `tap <sel>`, `swipe <sel> <dir> [dist]`
 
 **Observation:**
-`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`
+`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`
 
 **Network:**
 `capture [--bodies] [--filter] <path>`

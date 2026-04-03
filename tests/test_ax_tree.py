@@ -129,6 +129,78 @@ async def test_ax_tree_truncates_large_output(capsys):
 
 
 @pytest.mark.asyncio
+async def test_ax_tree_compact_strips_noise_leaves():
+    """--compact strips StaticText and InlineTextBox leaf nodes."""
+    client = _mock_client()
+    nodes = [
+        {'nodeId': '1', 'role': {'value': 'RootWebArea'},
+         'name': {'value': 'Page'}, 'childIds': ['2', '3', '4', '5']},
+        {'nodeId': '2', 'parentId': '1', 'role': {'value': 'heading'},
+         'name': {'value': 'Title'}, 'childIds': ['3']},
+        {'nodeId': '3', 'parentId': '2', 'role': {'value': 'StaticText'},
+         'name': {'value': 'Title'}, 'childIds': []},
+        {'nodeId': '4', 'parentId': '1', 'role': {'value': 'InlineTextBox'},
+         'name': {'value': 'some text'}, 'childIds': []},
+        {'nodeId': '5', 'parentId': '1', 'role': {'value': 'link'},
+         'name': {'value': 'Click me'}, 'childIds': []},
+    ]
+    client.send.return_value = {'result': {'nodes': nodes}}
+
+    result = await do_ax_tree(client, compact=True)
+    tree = json.loads(result)
+
+    root = tree[0]
+    # heading and link kept, StaticText and InlineTextBox stripped
+    roles = [c['role'] for c in root.get('children', [])]
+    assert 'heading' in roles
+    assert 'link' in roles
+    assert 'StaticText' not in roles
+    assert 'InlineTextBox' not in roles
+
+
+@pytest.mark.asyncio
+async def test_ax_tree_compact_keeps_non_leaf_statictext():
+    """--compact keeps StaticText if it has children (unlikely but safe)."""
+    client = _mock_client()
+    nodes = [
+        {'nodeId': '1', 'role': {'value': 'RootWebArea'},
+         'name': {'value': 'Page'}, 'childIds': ['2']},
+        {'nodeId': '2', 'parentId': '1', 'role': {'value': 'StaticText'},
+         'name': {'value': 'Parent text'}, 'childIds': ['3']},
+        {'nodeId': '3', 'parentId': '2', 'role': {'value': 'link'},
+         'name': {'value': 'Nested'}, 'childIds': []},
+    ]
+    client.send.return_value = {'result': {'nodes': nodes}}
+
+    result = await do_ax_tree(client, compact=True)
+    tree = json.loads(result)
+
+    # StaticText with a child should survive
+    root = tree[0]
+    assert root['children'][0]['role'] == 'StaticText'
+    assert root['children'][0]['children'][0]['role'] == 'link'
+
+
+@pytest.mark.asyncio
+async def test_ax_tree_compact_dispatch():
+    """ax-tree --compact dispatches through run_script."""
+    client = _mock_client()
+    nodes = [
+        {'nodeId': '1', 'role': {'value': 'RootWebArea'},
+         'name': {'value': 'Page'}, 'childIds': ['2']},
+        {'nodeId': '2', 'parentId': '1', 'role': {'value': 'StaticText'},
+         'name': {'value': 'Noise'}, 'childIds': []},
+    ]
+    client.send.return_value = {'result': {'nodes': nodes}}
+
+    result = await run_script(client, [('ax-tree', ['--compact'])])
+
+    assert result['ok'] is True
+    # Verify it ran — step detail goes to stderr as NDJSON
+    client.send.assert_any_call('Accessibility.getFullAXTree', {}, timeout=30.0)
+
+
+@pytest.mark.asyncio
 async def test_ax_tree_skips_ignored_nodes():
     """Ignored nodes are excluded from the tree."""
     client = _mock_client()

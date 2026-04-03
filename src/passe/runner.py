@@ -445,12 +445,15 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
             elif verb == 'ax-tree':
                 tree_args = list(args)
                 depth = None
+                compact = '--compact' in tree_args
+                if compact:
+                    tree_args.remove('--compact')
                 if '--depth' in tree_args:
                     idx = tree_args.index('--depth')
                     if idx + 1 < len(tree_args):
                         depth = int(tree_args[idx + 1])
                         del tree_args[idx:idx + 2]
-                text = await do_ax_tree(client, depth=depth)
+                text = await do_ax_tree(client, depth=depth, compact=compact)
                 word_count = len(text.split())
                 if word_count <= CONTENT_INLINE_THRESHOLD:
                     step_info['content'] = text
