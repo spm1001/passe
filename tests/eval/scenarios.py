@@ -151,39 +151,53 @@ SCENARIOS: list[Scenario] = [
         category="connection_error",
         prompt=(
             "I'm on hezza (Linux server). My Mac is closed. "
-            "Can you screenshot https://example.com?"
+            "I ran `passe look https://example.com` and got this:\n\n"
+            "[passe:connection] endpoint=http://100.66.153.39:9222 reachable=no\n"
+            "[passe:connection] reason=Chrome is not reachable at this endpoint\n"
+            "[passe:connection] alternatives=Use --cdp localhost:9222 for local headless Chrome; "
+            "Check that the remote machine is awake; "
+            "Start Chrome with --remote-debugging-port on the remote machine\n\n"
+            "Can you still screenshot the page?"
         ),
-        expect_any=["localhost", "headless", "chromium", "local"],
-        reject_any=["can't", "unable", "not possible", "won't work"],
-        rationale="Should suggest local headless Chrome, not give up",
+        expect_any=["--cdp localhost", "headless", "localhost:9222"],
+        reject_any=["can't", "unable", "not possible", "won't work",
+                     "passe is broken", "try curl"],
+        rationale="Given structured diagnostics with alternatives, Claude should "
+                  "follow the suggestion and use local headless Chrome",
     ),
 
     Scenario(
         id="ce-03",
         category="connection_error",
         prompt=(
-            "I need to screenshot a page but passe gave me: "
-            "'Cannot connect to Chrome at http://100.66.153.39:9222 — connection refused'. "
-            "What do I do?"
+            "I ran `passe status` and got:\n\n"
+            "[passe:status] cdp_endpoint=http://100.66.153.39:9222\n"
+            "[passe:status] remote=True\n"
+            "[passe:status] reachable=False\n"
+            "[passe:status] reason=Cannot connect to Chrome: <urlopen error timed out>\n"
+            "[passe:status] alternatives=Check that Chrome is running; "
+            "Use --cdp localhost:9222 for local headless Chrome\n\n"
+            "I need to screenshot a page. What should I do?"
         ),
-        expect_any=["Mac", "sleeping", "closed", "--cdp", "localhost",
-                     "headless", "local"],
+        expect_any=["--cdp localhost", "headless", "localhost:9222", "local"],
         reject_any=["passe is broken", "try curl", "use wget"],
-        rationale="Tailscale IP refused = Mac Chrome is down. "
-                  "Should diagnose and suggest local alternative.",
+        rationale="Given passe status output showing unreachable remote, "
+                  "Claude should suggest local headless Chrome.",
     ),
     Scenario(
         id="ce-04",
         category="connection_error",
         prompt=(
-            "passe fetch keeps timing out. I'm on hezza. "
-            "The PASSE_CDP variable points to my Mac but I'm not sure "
-            "if my Mac is on."
+            "passe fetch keeps failing with:\n\n"
+            "[passe:connection] endpoint=http://100.66.153.39:9222 reachable=no\n"
+            "[passe:connection] reason=Cannot connect to Chrome: <urlopen error timed out>\n"
+            "[passe:connection] alternatives=Use --cdp localhost:9222 for local headless Chrome; "
+            "Check that the remote machine is awake\n\n"
+            "I'm on hezza. How do I get this working?"
         ),
-        expect_any=["--cdp", "localhost", "PASSE_CDP", "local",
-                     "headless", "chromium"],
+        expect_any=["--cdp", "localhost", "local", "headless"],
         reject_any=["can't help", "unable to", "not possible"],
-        rationale="Should suggest using local Chrome or overriding PASSE_CDP",
+        rationale="Should follow the alternatives in the diagnostic output",
     ),
 
     # ── scout_pattern ────────────────────────────────────────────
