@@ -12,6 +12,25 @@ import websockets
 from passe.client import CDPClient
 
 
+class ChromeConnectionError(ConnectionError):
+    """Structured connection error with diagnostic fields for Claude."""
+
+    def __init__(self, endpoint: str, reason: str, alternatives: list[str] = None):
+        self.endpoint = endpoint
+        self.reason = reason
+        self.alternatives = alternatives or []
+        super().__init__(self._format_message())
+
+    def _format_message(self) -> str:
+        lines = [
+            f"[passe:connection] endpoint={self.endpoint} reachable=no",
+            f"[passe:connection] reason={self.reason}",
+        ]
+        if self.alternatives:
+            lines.append(f"[passe:connection] alternatives={'; '.join(self.alternatives)}")
+        return '\n'.join(lines)
+
+
 _cdp_override: str | None = None
 
 
@@ -64,12 +83,12 @@ def _start_chrome(port=9222, headless=False):
     from pathlib import Path
     chrome_path = _find_chrome()
     if not chrome_path:
-        print(
-            "No Chrome/Chromium found.\n"
-            f"Install Chrome or set PASSE_CDP to an existing instance.",
-            file=sys.stderr,
+        raise ChromeConnectionError(
+            endpoint=f'localhost:{port}',
+            reason="No Chrome/Chromium binary found on this machine",
+            alternatives=["Install chromium-browser or google-chrome",
+                           "Set PASSE_CDP to point at an existing Chrome instance"],
         )
-        sys.exit(1)
     cmd = [
         chrome_path,
         f'--remote-debugging-port={port}',
@@ -85,20 +104,23 @@ def _start_chrome(port=9222, headless=False):
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
         )
     except FileNotFoundError:
-        print(
-            f"Chrome not found at {chrome_path}\n"
-            f"Start Chrome manually with --remote-debugging-port={port} "
-            f"or set PASSE_CDP to an existing Chrome instance.",
-            file=sys.stderr,
+        raise ChromeConnectionError(
+            endpoint=f'localhost:{port}',
+            reason=f"Chrome binary at {chrome_path} could not be executed",
+            alternatives=[f"Start Chrome manually with --remote-debugging-port={port}",
+                           "Set PASSE_CDP to point at an existing Chrome instance"],
         )
-        sys.exit(1)
     for _ in range(30):
         if _chrome_running():
             print(f"[passe] {label} started (pid {proc.pid}).", file=sys.stderr)
             return proc if headless else None
         time.sleep(0.5)
-    print(f"[passe] failed to start {label}.", file=sys.stderr)
-    sys.exit(1)
+    raise ChromeConnectionError(
+        endpoint=f'localhost:{port}',
+        reason=f"Chrome started but never became reachable after 15 seconds",
+        alternatives=["Check for port conflicts on port " + str(port),
+                       "Try a different port: passe --cdp localhost:9223 ..."],
+    )
 
 
 def _is_loopback(url: str) -> bool:
@@ -137,8 +159,13 @@ def discover_chrome(cdp_url: str | None = None) -> tuple[str, dict]:
         with urllib.request.urlopen(f'{base_url}/json/version', timeout=5) as resp:
             version_info = json.loads(resp.read())
     except Exception as exc:
-        raise ConnectionError(
-            f"Cannot connect to Chrome at {base_url}: {exc}"
+        raise ChromeConnectionError(
+            endpoint=base_url,
+            reason=f"Cannot connect to Chrome: {exc}",
+            alternatives=["Check that Chrome is running with --remote-debugging-port",
+                           "Use --cdp localhost:9222 for local headless Chrome"] if is_remote else
+                          ["Start Chrome with --remote-debugging-port",
+                           "Install chromium-browser if not installed"],
         ) from exc
 
     ws_url = version_info['webSocketDebuggerUrl']
@@ -168,13 +195,13 @@ async def connect(port=9222):
     chrome_proc = None
     if not _chrome_running():
         if is_remote:
-            print(
-                f"Cannot connect to Chrome at {base_url}\n"
-                f"Check that Chrome is running with --remote-debugging-port "
-                f"or set PASSE_CDP to the correct endpoint.",
-                file=sys.stderr,
+            raise ChromeConnectionError(
+                endpoint=base_url,
+                reason="Chrome is not reachable at this endpoint",
+                alternatives=["Use --cdp localhost:9222 for local headless Chrome",
+                               "Check that the remote machine is awake",
+                               "Start Chrome with --remote-debugging-port on the remote machine"],
             )
-            sys.exit(1)
         # Auto-launch: headless when no explicit CDP target (passe owns it),
         # GUI when user explicitly pointed at localhost (they want Chrome Passe)
         headless = not cdp_explicit

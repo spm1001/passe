@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 
-from passe.connection import set_cdp_override
+from passe.connection import set_cdp_override, ChromeConnectionError
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_screenshot, cmd_eval, cmd_devices,
                             cmd_tabs, cmd_tabs_close)
@@ -216,6 +216,9 @@ def _run(coro):
         sys.exit(130)
     except SystemExit:
         raise
+    except ChromeConnectionError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
     except Exception as exc:
         print(f'passe: {exc}', file=sys.stderr)
         sys.exit(1)
