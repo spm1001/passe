@@ -81,7 +81,10 @@ app.innerHTML = html;
 
 
 class _Handler(BaseHTTPRequestHandler):
+    timeout = 2  # socket timeout — breaks keep-alive deadlock on shutdown
+
     def do_GET(self):
+        self.close_connection = True
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.end_headers()
@@ -100,6 +103,7 @@ def spa_server(monkeypatch):
     """
     monkeypatch.delenv('PASSE_CDP', raising=False)
     server = HTTPServer(('127.0.0.1', 0), _Handler)
+    server.timeout = 1  # unblock handler threads stuck on keep-alive
     port = server.server_address[1]
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
