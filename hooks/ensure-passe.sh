@@ -1,41 +1,58 @@
 #!/bin/bash
 # SessionStart hook: ensure passe CLI is available and version-aligned.
-# Silent when everything is fine; helpful when it's not.
+# Auto-fixes drift; reports what it did. Silent when everything is fine.
 
 # Skip for subagent invocations (fork bomb prevention)
 [ -n "${CLAUDE_SUBAGENT:-}" ] && exit 0
 
-# Ensure ~/.local/bin is in PATH (where uv tool install puts binaries)
 export PATH="$HOME/.local/bin:$PATH"
-
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+FIXED=""
 ISSUES=""
 
-# Check 1: passe CLI available
-if ! command -v passe &>/dev/null; then
-    PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-    if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/pyproject.toml" ]; then
-        INSTALL_HINT="uv tool install \"$PLUGIN_ROOT\""
-    else
-        INSTALL_HINT="uv tool install passe"
-    fi
-    ISSUES="${ISSUES}• passe CLI not found. Install it:\n\n  ${INSTALL_HINT}\n\n  Then ensure ~/.local/bin is in your PATH.\n"
+# Resolve install source
+if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/pyproject.toml" ]; then
+    INSTALL_SRC="$PLUGIN_ROOT"
+else
+    INSTALL_SRC="passe"
 fi
 
-# Check 2: version alignment (only if CLI found)
-if [ -z "$ISSUES" ]; then
-    PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
+# Check 1: CLI missing → auto-install
+if ! command -v passe &>/dev/null; then
+    if uv tool install "$INSTALL_SRC" --force --reinstall >/dev/null 2>&1; then
+        FIXED="${FIXED}• passe CLI installed\n"
+    else
+        ISSUES="${ISSUES}• passe CLI not found and auto-install failed. Run manually:\n\n  uv tool install \"$INSTALL_SRC\"\n"
+    fi
+fi
+
+# Check 2: version drift → auto-update
+if [ -z "$ISSUES" ] && command -v passe &>/dev/null; then
     if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
         INSTALLED=$(passe --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
         EXPECTED=$(python3 -c "import json; print(json.load(open('$PLUGIN_ROOT/.claude-plugin/plugin.json'))['version'])" 2>/dev/null || true)
         if [ -n "$INSTALLED" ] && [ -n "$EXPECTED" ] && [ "$INSTALLED" != "$EXPECTED" ]; then
-            ISSUES="${ISSUES}• passe CLI is v${INSTALLED} but plugin is v${EXPECTED}. Update:\n\n  uv tool install \"$PLUGIN_ROOT\" --force --reinstall\n"
+            # Only auto-upgrade (CLI behind plugin). CLI ahead = dev installed from repo, don't downgrade.
+            CLI_BEHIND=$(python3 -c "print(tuple(int(x) for x in '$INSTALLED'.split('.')) < tuple(int(x) for x in '$EXPECTED'.split('.')))" 2>/dev/null || true)
+            if [ "$CLI_BEHIND" = "True" ]; then
+                if uv tool install "$INSTALL_SRC" --force --reinstall >/dev/null 2>&1; then
+                    FIXED="${FIXED}• passe CLI updated: v${INSTALLED} → v${EXPECTED}\n"
+                else
+                    ISSUES="${ISSUES}• passe CLI is v${INSTALLED} but plugin is v${EXPECTED}. Auto-update failed.\n"
+                fi
+            fi
         fi
     fi
 fi
 
-# If no issues, exit silently
-[ -z "$ISSUES" ] && exit 0
+# Silent exit if nothing happened
+[ -z "$FIXED" ] && [ -z "$ISSUES" ] && exit 0
+
+# Report
+MSG=""
+[ -n "$FIXED" ] && MSG="${MSG}✓ passe auto-fixed:\n\n${FIXED}"
+[ -n "$ISSUES" ] && MSG="${MSG}⚠️ passe needs attention:\n\n${ISSUES}"
 
 cat <<EOF
-{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "⚠️ passe needs attention:\n\n${ISSUES}"}}
+{"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "${MSG}"}}
 EOF
