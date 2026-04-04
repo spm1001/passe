@@ -17,6 +17,16 @@ description: >
 
 Fast CDP browser automation. One Bash call, one WebSocket, no model round-trips during execution.
 
+## When to Use
+
+Any task that needs a real browser: reading JavaScript-rendered pages, taking screenshots, filling forms, dismissing overlays, reverse-engineering APIs via network capture, verifying deployments, mobile device emulation.
+
+## When NOT to Use
+
+- **Google Workspace content** — use `mise fetch` for Drive, Gmail, Sheets
+- **Static pages with no JS** — `passe fetch` tries HTTP-first automatically, but plain `curl` may suffice
+- **Long-running browser sessions** — passe runs scripts, not interactive sessions
+
 ## Quick reference
 
 | Need | Command |
@@ -28,7 +38,7 @@ Fast CDP browser automation. One Bash call, one WebSocket, no model round-trips 
 | Multi-step interaction | `passe run` with heredoc |
 | Quick JS on current tab | `passe eval "expression"` |
 
-## DO NOT
+## Anti-Patterns
 
 1. **DO NOT run `passe eval` or `passe screenshot` expecting to see your `passe run` page.** The tab is gone. Put everything in one script.
 2. **DO NOT add `wait` before `extract` after a `goto`.** Auto-wait handles this. Use `fetch` for the common case.
