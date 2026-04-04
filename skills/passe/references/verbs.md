@@ -10,7 +10,7 @@
 `click <sel-or-text>`, `type <sel> <text>`, `fill <sel> <val>`, `select <sel> <val>`, `press <key>`, `hover <sel>`, `tap <sel>`, `swipe <sel> <dir> [dist]`
 
 **Observation:**
-`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`
+`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`, `exists <sel>`, `count <sel>`, `visible <sel>`, `pdf [path]`
 
 **Network:**
 `capture [--bodies] [--filter] <path>`

@@ -22,6 +22,7 @@ from passe.verbs import (
     do_eval, do_eval_to, do_eval_file, do_eval_file_to,
     do_assert, do_watch, do_frame,
     do_ax_tree, do_ax_find, do_ax_node,
+    do_exists, do_count, do_visible, do_pdf,
 )
 
 
@@ -485,6 +486,22 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 selector = args[0] if args else 'body'
                 text = await do_ax_node(client, selector)
                 step_info['content'] = text
+            elif verb == 'exists':
+                result = await do_exists(client, args[0])
+                step_info['result'] = result
+            elif verb == 'count':
+                result = await do_count(client, args[0])
+                step_info['result'] = result
+            elif verb == 'visible':
+                result = await do_visible(client, args[0])
+                step_info['result'] = result
+            elif verb == 'pdf':
+                path = args[0] if args else None
+                info = await do_pdf(client, path)
+                step_info['file'] = info['file']
+                step_info['kb'] = info['kb']
+                files.append({'path': info['file'], 'verb': 'pdf',
+                              'kb': info['kb']})
             elif verb == 'bring-to-front':
                 await client.send('Page.bringToFront')
             elif verb == 'capture':

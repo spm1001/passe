@@ -622,6 +622,54 @@ async def do_fetch(client: CDPClient, url: str, path: str = None,
     return result
 
 
+async def do_exists(client: CDPClient, selector: str) -> bool:
+    """Check whether an element matching the selector exists in the DOM."""
+    result = await client.send('Runtime.evaluate', {
+        'expression': f'document.querySelector({json.dumps(selector)}) !== null',
+        'awaitPromise': False,
+    })
+    return result['result']['result'].get('value', False)
+
+
+async def do_count(client: CDPClient, selector: str) -> int:
+    """Count elements matching the selector."""
+    result = await client.send('Runtime.evaluate', {
+        'expression': f'document.querySelectorAll({json.dumps(selector)}).length',
+        'awaitPromise': False,
+    })
+    return result['result']['result'].get('value', 0)
+
+
+async def do_visible(client: CDPClient, selector: str) -> bool:
+    """Check whether an element is visible (exists, has dimensions, not hidden)."""
+    js = f'''(() => {{
+        const el = document.querySelector({json.dumps(selector)});
+        if (!el) return false;
+        const style = getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    }})()'''
+    result = await client.send('Runtime.evaluate', {
+        'expression': js, 'awaitPromise': False,
+    })
+    return result['result']['result'].get('value', False)
+
+
+async def do_pdf(client: CDPClient, path: str = None) -> dict:
+    """Save page as PDF via Page.printToPDF. Returns dict with path and size."""
+    result = await client.send('Page.printToPDF', {
+        'printBackground': True,
+        'preferCSSPageSize': True,
+    }, timeout=60.0)
+    data = base64.b64decode(result['result']['data'])
+    if path is None:
+        path = f'/tmp/passe-{int(time.time())}.pdf'
+    with open(path, 'wb') as f:
+        f.write(data)
+    return {'file': path, 'kb': round(len(data) / 1024, 1)}
+
+
 async def do_eval(client: CDPClient, expression: str) -> str:
     result = await client.send('Runtime.evaluate', {
         'expression': expression, 'awaitPromise': True

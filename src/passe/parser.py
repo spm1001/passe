@@ -14,6 +14,7 @@ KNOWN_VERBS = {
     'back', 'forward', 'eval', 'eval-to', 'eval-file', 'eval-file-to',
     'assert', 'log', 'bring-to-front', 'frame',
     'ax-tree', 'ax-find', 'ax-node',
+    'exists', 'count', 'visible', 'pdf',
 }
 
 # Verbs that trigger auto-wait in the next read/fetch step.
@@ -68,6 +69,7 @@ VERB_MIN_ARGS = {
     'eval': 1, 'eval-to': 2, 'eval-file': 1, 'eval-file-to': 2,
     'assert': 1, 'log': 1, 'capture': 1,
     'frame': 1,
+    'exists': 1, 'count': 1, 'visible': 1,
 }
 
 

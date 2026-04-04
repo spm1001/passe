@@ -115,7 +115,24 @@ passe run -c 'goto https://site.com; ax-find --role link --name Settings'
 passe run -c 'goto https://site.com; ax-node nav'
 ```
 
-**When to use which:** `snapshot` for CSS selectors you'll click/type into. `ax-tree` for understanding page semantics — what the page *means*, not just what's clickable. `ax-find` for targeted search (e.g. finding all buttons on a cookie banner).
+**Quick checks — no eval needed:**
+```bash
+# Does an element exist?
+passe run --reuse-tab -c 'exists "#login-btn"'
+
+# How many matches?
+passe run --reuse-tab -c 'count ".search-result"'
+
+# Is it visible (not hidden, has dimensions)?
+passe run --reuse-tab -c 'visible ".error-banner"'
+
+# Save page as PDF
+passe run --reuse-tab -c 'pdf /tmp/page.pdf'
+```
+
+`exists`, `count`, `visible` return their result directly in the step JSON — no eval wrappers needed. `pdf` writes via `Page.printToPDF` with backgrounds and CSS page sizes.
+
+**When to use which:** `snapshot` for CSS selectors you'll click/type into. `ax-tree` for understanding page semantics — what the page *means*, not just what's clickable. `ax-find` for targeted search (e.g. finding all buttons on a cookie banner). `exists`/`count`/`visible` for quick assertions without writing JS.
 
 ### 4. Dismiss a cookie banner
 
