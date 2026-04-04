@@ -2,12 +2,15 @@
 name: passe
 allowed-tools: ["Bash(passe:*)", Read]
 description: >
-  Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE any
-  `passe` command — provides verb vocabulary, scout-then-act pattern, and invocation
-  conventions that prevent malformed scripts. Triggers on 'passe run',
-  'automate the browser', 'screenshot a page', 'interact with a website',
-  'scrape this page', 'capture network requests', 'reverse-engineer API',
-  'fetch this page', 'check if this page has', 'verify deployment'. (user)
+  Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE
+  any `passe` command — 12-recipe cookbook covering scout-then-act pattern,
+  verb conventions, and common pitfalls that prevent malformed scripts.
+  Triggers on 'passe run', 'automate the browser', 'screenshot a page',
+  'scrape this page', 'fetch this page', 'open this URL in Chrome',
+  'what does this page look like on mobile', 'fill out this form',
+  'capture network requests', 'reverse-engineer API', 'check if this
+  page has', 'verify deployment', 'dismiss cookie banner',
+  'monitor network traffic'. (user)
 ---
 
 # Passe Cookbook
@@ -49,7 +52,7 @@ passe fetch https://paulgraham.com/superlinear.html
 passe fetch https://react.dev/reference/react/useState /tmp/content.md
 ```
 
-**Apple Developer docs** auto-detected — fetched from structured JSON endpoint. **Next.js** sites use `__NEXT_DATA__` fast-path. Most pages try HTTP-first before touching Chrome (~87% succeed without a browser).
+**Apple Developer docs** auto-detected — fetched from structured JSON endpoint. **Next.js** sites use `__NEXT_DATA__` fast-path. Most pages try HTTP-first before touching Chrome.
 
 **If extraction looks thin:** check the `source` field in output. Try `--source readability` or `--source innertext` to bypass trafilatura. If a cookie banner is blocking content, dismiss it first (recipe 4).
 
@@ -117,7 +120,7 @@ passe run - <<'EOF'
 goto https://spiegel.de
 click "#reject-button-selector"
 wait 0.5
-read /tmp/content.md
+extract /tmp/content.md
 EOF
 
 # Option B: snapshot (shows CSS selectors directly)
@@ -206,6 +209,10 @@ Start `watch` with `Bash run_in_background`. Read `/tmp/mobile.jpg` after each e
 
 ### 9. Handle auth pages
 
+#### Manual login flow
+
+When a page requires user login, navigate their visible tab and wait:
+
 ```bash
 # Navigate the user's visible tab to the login page
 passe run --reuse-tab -c 'goto https://accounts.google.com/oauth/...'
@@ -216,10 +223,15 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 
 **Warning:** `--reuse-tab` navigates away from whatever the user is looking at. Only use when explicitly co-viewing.
 
-For authenticated APIs, skip the UI — Chrome has the cookies:
+#### Authenticated API shortcut
+
+When Chrome already has cookies (user is logged in), skip the UI entirely:
+
 ```bash
 passe run -c 'goto https://intranet.example.com; eval-to /tmp/data.json (async()=>{const r=await fetch("/api/data");return JSON.stringify(await r.json())})()'
 ```
+
+This is the same pattern as recipe 6 — use Chrome's session to call APIs directly.
 
 ### 10. Work inside an iframe
 
@@ -319,48 +331,7 @@ passe run --foreground -c '...'
 
 ---
 
-## Verb reference
+## Reference
 
-**Extraction:**
-`fetch <url> [--source S] [path]` — goto + auto-wait + read (compound). `extract [--source S] [--no-wait] [path]` — extract current page (`read` is alias). Sources: `trafilatura` (default), `readability`, `innertext`, `raw`.
-
-**Navigation:**
-`goto <url>`, `back`, `forward`, `scroll <x> <y>`
-
-**Interaction:**
-`click <sel-or-text>`, `type <sel> <text>`, `fill <sel> <val>`, `select <sel> <val>`, `press <key>`, `hover <sel>`, `tap <sel>`, `swipe <sel> <dir> [dist]`
-
-**Observation:**
-`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`
-
-**Network:**
-`capture [--bodies] [--filter] <path>`
-
-**Control:**
-`wait` (bare=network idle, `<n>`=sleep, `<sel>`=element), `wait-for <sel>`, `wait-idle`, `watch [--fast] [--cooldown N] <path>`, `assert <expr>`, `log <msg>`, `frame <url-pattern>`, `frame top`, `bring-to-front`
-
-**Emulation:**
-`device <name> [--dpr N]`, `viewport <w> <h>`
-
-## Output protocol
-
-**stderr:** NDJSON per step — `{"i":0,"verb":"goto","ms":342}`
-**stdout:** summary — `{"ok":true,"steps":6,"total_ms":443,"files":[...]}`
-**Exit:** 0=success, 1=failure
-
-## Content extraction cascade
-
-1. Content-type sniffing (JSON/XML/CSV → raw passthrough)
-2. Apple docs → structured JSON endpoint
-3. trafilatura (Python-side, handles most pages)
-4. Readability.js + Turndown (browser-side fallback)
-5. innerText (last resort)
-
-Shadow DOM flattened before extraction. `source` field in output tells you which extractor was used.
-
-## Development
-
-```bash
-uv tool install ~/Repos/batterie/passe --force --reinstall   # --reinstall forces wheel rebuild
-uv run --with pytest --with pytest-asyncio python -m pytest tests/ -v
-```
+Full verb list: `references/verbs.md`
+Output protocol and extraction internals: `references/internals.md`
