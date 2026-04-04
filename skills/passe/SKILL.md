@@ -2,9 +2,11 @@
 name: passe
 allowed-tools: ["Bash(passe:*)", Read]
 description: >
-  Orchestrates fast CDP browser automation via line DSL. MANDATORY BEFORE
-  any `passe` command — 12-recipe cookbook covering scout-then-act pattern,
-  verb conventions, and common pitfalls that prevent malformed scripts.
+  Orchestrates browser automation — read pages, take screenshots, fill
+  forms, capture network traffic, and verify deployments via Chrome CDP.
+  MANDATORY BEFORE any `passe` command — 12-recipe cookbook covering
+  scout-then-act pattern, verb conventions, and common pitfalls that
+  prevent malformed scripts.
   Triggers on 'passe run', 'automate the browser', 'screenshot a page',
   'scrape this page', 'fetch this page', 'open this URL in Chrome',
   'what does this page look like on mobile', 'fill out this form',
@@ -119,23 +121,24 @@ passe run -c 'goto https://site.com; ax-node nav'
 
 Never guess button text. Scout first.
 
+**Step 1: Scout** — find the button:
 ```bash
-# Option A: ax-find (fastest — finds buttons by role)
-passe run - <<'EOF'
-goto https://spiegel.de
-ax-find button
-EOF
-# Read output, find the reject/accept button, then:
+passe run -c 'goto https://spiegel.de; ax-find button'
+```
+
+**Step 2: Act** — click it (in a separate Bash call):
+```bash
 passe run - <<'EOF'
 goto https://spiegel.de
 click "#reject-button-selector"
 wait 0.5
 extract /tmp/content.md
 EOF
+```
 
-# Option B: snapshot (shows CSS selectors directly)
+Alternative: `snapshot` gives CSS selectors directly:
+```bash
 passe run -c 'goto https://spiegel.de; snapshot /tmp/elements.txt'
-# Read elements.txt, find the cookie button's CSS selector, then act
 ```
 
 Two Bash calls total. `ax-find button` is often faster because it returns all buttons with their accessible names — you can identify "Reject All" vs "Accept" immediately.
@@ -235,13 +238,7 @@ passe run --reuse-tab -c 'eval document.body.innerText'
 
 #### Authenticated API shortcut
 
-When Chrome already has cookies (user is logged in), skip the UI entirely:
-
-```bash
-passe run -c 'goto https://intranet.example.com; eval-to /tmp/data.json (async()=>{const r=await fetch("/api/data");return JSON.stringify(await r.json())})()'
-```
-
-This is the same pattern as recipe 6 — use Chrome's session to call APIs directly.
+When Chrome already has cookies, skip the login UI — use `capture` + `eval` to call APIs directly with Chrome's session. See recipe 6 for the full pattern.
 
 ### 10. Work inside an iframe
 
@@ -343,5 +340,7 @@ passe run --foreground -c '...'
 
 ## Reference
 
-Full verb list: `references/verbs.md`
-Output protocol and extraction internals: `references/internals.md`
+Read when you need a verb not covered in the recipes above, or need output format details.
+
+- Verb list: `references/verbs.md`
+- Output protocol and extraction cascade: `references/internals.md`
