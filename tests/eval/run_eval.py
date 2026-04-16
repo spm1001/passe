@@ -254,8 +254,8 @@ def main():
                       help="Use Anthropic API (costs tokens)")
     mode.add_argument("--local", action="store_true", default=True,
                       help="Use ardoise + local Claude (default, free)")
-    parser.add_argument("--model", default="claude-sonnet-4-6",
-                        help="Model to test (default: claude-sonnet-4-6)")
+    parser.add_argument("--model", default="sonnet",
+                        help="Model to test (default: sonnet — CC family-name resolution)")
     parser.add_argument("--category", help="Run only scenarios in this category")
     parser.add_argument("--id", help="Run only this scenario ID")
     parser.add_argument("--verbose", "-v", action="store_true",
