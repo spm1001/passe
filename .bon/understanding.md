@@ -16,17 +16,39 @@ Trafilatura is the benchmark leader (F1 0.958). The readability-lxml + markdowni
 
 The quality gate uses composite scoring: word count, stop words ratio (jusText thresholds), link density (Boilerpipe's 0.33 threshold), text-to-HTML ratio, and paywall/CAPTCHA/cookie-consent detection. Thresholds (0.35 composite, 50 min words, 0.20 stop words, 0.33 link density) were tuned against the corpus once — two bugs found (CAPTCHA false positives on Wikipedia, stop words penalty on large technical docs). A systematic threshold sweep using the bench harness is possible but hasn't been done.
 
-## Testing Landmine
+## Testing Landmines
 
 When testing `cmd_fetch`, always mock `passe.fastpath.try_http_fetch` to return `None` — otherwise the test makes real HTTP calls and the fast-path may short-circuit before reaching the code under test.
 
+Integration tests using `BaseHTTPRequestHandler` will deadlock on shutdown if Chrome holds keep-alive connections. Fix: set `timeout = 2` on the handler class — `StreamRequestHandler.setup` calls `settimeout` on the socket, and `handle_one_request` catches `TimeoutError`.
+
 ## The Integration Testing Lesson
 
-Unit tests that bypass the real transport layer give false confidence for async WebSocket code. The daemon passed 30 unit tests while deadlocking on first real use — `send()` waited for CDP responses via futures, but the receiver task that dispatches responses wasn't running yet. The tests passed because they called `_dispatch()` directly, never exercising the send-receive-future resolution cycle. The lesson isn't "unit tests are bad" — they caught real bugs in filtering, request assembly, rotation, and reconnection logic. The lesson is: for code where the architecture IS the concurrency (background tasks, message routing, lifecycle ordering), integration tests against the real dependency are the only tests that matter for "does it actually work."
+Unit tests that bypass the real transport layer give false confidence for async WebSocket code. The daemon passed 30 unit tests while deadlocking on first real use — `send()` waited for CDP responses via futures, but the receiver task that dispatches responses wasn't running yet. The tests passed because they called `_dispatch()` directly, never exercising the send-receive-future resolution cycle. The lesson: for code where the architecture IS the concurrency (background tasks, message routing, lifecycle ordering), integration tests against the real dependency are the only tests that matter for "does it actually work."
 
 ## CDP Tab Discovery: Two Paths
 
 Chrome's CDP has two tab discovery mechanisms: the `/json` HTTP endpoint (always works, returns all targets) and `Target.getTargets` via WebSocket (requires `Target.setDiscoverTargets` to be called first on the connection). On fresh connections — which is every passe invocation — `Target.getTargets` returns empty. This doesn't matter on local headless Chromium (which behaves differently), only on remote Chrome via tailscale. The daemon gets this right because it calls `setDiscoverTargets` during its persistent connection setup. For short-lived passe commands, the `/json` HTTP endpoint is the reliable path. The key names differ: HTTP uses `id`, CDP uses `targetId` — any unified helper must normalize.
+
+## Accessibility Tree (ax-tree)
+
+The CDP Accessibility domain (`getFullAXTree`) returns the browser's computed semantic tree — roles, names, values — with transparent node collapsing. `queryAXTree` (server-side filtering) hangs on Chrome 146; client-side filtering of the full tree is fast enough (<100ms on GitHub, <400ms on Wikipedia). All Accessibility domain calls respect CDP session scoping in cross-origin iframes.
+
+`ax-tree --compact` strips text-leaf nodes (27-74% reduction). The real value is signal density: actionable node proportion jumps from ~12% to 18-45%. Wikipedia goes from 12% actionable to 45%. Text-heavy pages benefit most; structure-heavy sites (Guardian, BBC) barely change. The <100 node target from the original brief was unrealistic and the wrong metric — compact makes trees useful for navigation, not small.
+
+The ax-tree verbs complement `snapshot`: snapshot gives CSS selectors for interaction, ax-tree gives semantic understanding for page comprehension and accessibility-aware element discovery.
+
+## Connection Error Architecture
+
+The connection failure root cause was `sys.exit(1)` in `connection.py`, not inadequate error messages. When passe killed the process on connection failure, Claude had no chance to reason about alternatives. Replacing `sys.exit` with `ChromeConnectionError` (a `ConnectionError` subclass) carrying structured diagnostic fields (endpoint, reason, alternatives) lets the CLI's `_run()` catch it and print parseable output. The `[passe:connection]` and `[passe:status]` prefixed formats are now implicit API surface — Claude pattern-matches on them in SKILL.md troubleshooting guidance. Lazy imports between the four verb modules prevent circular import issues — `do_eval` is the most cross-referenced function.
+
+## Eval Harness
+
+The eval harness in `tests/eval/` tests whether Claudes use passe correctly — it's a Claude behaviour test, not a unit test suite. Key finding: connection_error scenarios are the weak spot. Sonnet fires `passe look` without considering connection context 80% of the time when told "Mac is closed." Improvements should focus on making errors Claude-actionable. Subtle methodology finding: putting passe context in the API system param vs in the user message produces different Sonnet behaviour, suggesting SKILL.md positioning matters as much as content.
+
+## SKILL.md Maintenance
+
+The skill-forge lint and CSO scorer optimise for different things and can conflict. Removing the MANDATORY gate from the description (as the Anthropic reviewer suggested) dropped CSO from 90 to 61. The gate is needed for discovery — the instruction shard only fires if passe is already installed. Keep MANDATORY BEFORE in the description; soften tone elsewhere. Lint cares about section headings (When to Use, Anti-Patterns); the cookbook's existing sections serve the same role but need the expected heading names.
 
 ## Module Ownership
 
@@ -34,14 +56,30 @@ Chrome's CDP has two tab discovery mechanisms: the `/json` HTTP endpoint (always
 
 ## OOPiF Iframe Targeting (March 2026)
 
-Chrome exposes cross-origin iframes (OOPiFs) as first-class CDP targets in `/json/list` with `type: "iframe"`, their own `targetId`, `parentId`, and `webSocketDebuggerUrl`. You attach via `Target.attachToTarget` on the same browser WebSocket — both parent and iframe sessions coexist, and you swap `sessionId` to toggle context. Everything works except `Page.captureScreenshot`, which Chrome restricts to top-level targets only. The parentId chain can be deeply nested (PowerPoint tab → intermediate Office iframe → Claude plugin iframe), so walking up to the root page requires iterating. Same-origin iframes never appear in `/json/list` — they share the parent's process and are reachable via `eval` with `contentDocument`. Headless Chrome with `--no-sandbox` doesn't produce OOPiFs at all, so testing iframe targeting requires a real Chrome profile with site isolation enabled.
+Chrome exposes cross-origin iframes (OOPiFs) as first-class CDP targets in `/json/list` with `type: "iframe"`, their own `targetId`, `parentId`, and `webSocketDebuggerUrl`. You attach via `Target.attachToTarget` on the same browser WebSocket — both parent and iframe sessions coexist, and you swap `sessionId` to toggle context. Everything works except `Page.captureScreenshot`, which Chrome restricts to top-level targets only. Same-origin iframes never appear in `/json/list` — they share the parent's process and are reachable via `eval` with `contentDocument`. Headless Chrome with `--no-sandbox` doesn't produce OOPiFs at all, so testing iframe targeting requires a real Chrome profile with site isolation enabled.
 
 ## Chrome Log Absorption (March 2026)
 
-skill-chrome-log (a separate repo) provides continuous background network capture across all Chrome tabs — always-on recording of HTTP traffic to JSONL, with CLI query tools and an HTML dashboard. It's been absorbed into passe as `passe log` subcommands, making passe the single Chrome tool.
-
 The daemon (`log_daemon.py`) is architecturally distinct from CDPClient. CDPClient is single-session request-response with one-shot event waiters. The daemon is multi-session continuous streaming with `Target.setAutoAttach` (flattened sessions) routing events from all tabs through one WebSocket. These are different shapes — the daemon has its own WebSocket handler, reusing only `discover_chrome()` from `connection.py`.
 
-The daemon is built and smoke-tested against real Chrome. Key design: `@_handles('CDP.method')` decorator for self-documenting handler registration, separate `records`/`meta` dicts in `RequestStore` to prevent internal fields leaking into JSONL, `asyncio.to_thread(discover_chrome)` to avoid blocking the event loop during reconnection, and `_log_task_error` done callbacks on all fire-and-forget tasks.
+Critical pattern — receiver before send: The daemon's `_connect_and_attach()` must start the `_receive_messages` background task BEFORE sending any CDP commands. `send()` creates futures that only resolve when the receiver dispatches responses. Without the receiver running, `send()` deadlocks.
 
-Critical pattern — receiver before send: The daemon's `_connect_and_attach()` must start the `_receive_messages` background task BEFORE sending any CDP commands. `send()` creates futures that only resolve when the receiver dispatches responses. Without the receiver running, `send()` deadlocks. This was caught by smoke testing.
+## Infrastructure (April 2026)
+
+SOCKS tunnel (`socks-kube-tunnel.service`) routes headless Chrome through kube's residential IP — solves IP-based blocking. Health-check timer (5 min interval) auto-restarts on failure. But `--proxy-server` has NO fallback — if kube is down, all Chrome browsing fails. PAC files don't work in `--headless=new`. Escape hatch: restore the backup service file without proxy.
+
+Medium, StackOverflow, Reddit still 403 even with residential IP — headless detection (not IP blocking) is the real remaining problem. Filed as passe-depeni.
+
+## External Tool Comparisons (April 2026)
+
+**Kuri evaluation.** Kuri (`github.com/justrach/kuri`) is a Zig CDP browser CLI in passe's exact lane. We evaluated it live on hezza. The headline HTTP server is broken on Linux (managed Chrome zombies because the binary search misses `/usr/bin/chromium`; even with `CDP_URL` set the bridge can't reach it). The released binary lags its source. Where it shines: `kuri-agent snap --interactive` returns flat `[{"ref":"e0","role":"link","name":"X"}]` JSON — a much better agent token shape than passe's nested ax-tree — and `js/stealth.js` is a tidy reference implementation for Phase 1 of `passe-depeni`.
+
+**Decision: compete by absorption, not replacement.** Three things worth lifting: the flat-refs output shape (with a session ref-cache so `click e7` works between calls), the stealth-script injection pattern, and a bot-block detector heuristic on `goto`. Don't fork Zig; we don't write it, we don't want to maintain a CDP/WS/HTTP-server stack, and passe has months of depth (trafilatura, log daemon, frame, fast-path) that's impractical to reverse-port. The principle: passe's edge is depth in our own ecosystem; lift good shapes from peers, leave the runtime alone.
+
+## Ergonomic Principle (April 2026)
+
+Passe is wide and stateless-per-call. That's the right design for the speed claim — every action happens in one Bash call without model round-trips. But it pushes orchestration onto the writer, and the writer is often a Claude that reaches for `passe run -c '...'` when the right answer is a one-shot subcommand. The cost of width shows up as Claudes stumbling on which path applies.
+
+Subcommands (`fetch`, `look`, `check`, `screenshot`, `eval`, `capture`, `tabs`) are the path of least resistance for atomic agent operations. `passe run` is for genuinely multi-step compositions. When verbs have analogous subcommand forms, the cookbook should lead with the subcommand and treat `run` as the advanced path. "Did you mean?" hints, per-verb `--help`, and SKILL.md ordering are all surfaces where this principle gets enforced or eroded.
+
+Compared to kuri's stateful CLI (`use → go → snap → click eN`), passe's atomic-per-call model is faster but harder to think in. The mitigation isn't to abandon the model — it's to make the obvious path the right path more often.
