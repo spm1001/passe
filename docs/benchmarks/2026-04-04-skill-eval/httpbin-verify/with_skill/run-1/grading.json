@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Used passe check with --contains or passe run with assert",
+      "passed": true,
+      "evidence": "Used passe check --contains 'Herman Melville' --screenshot"
+    },
+    {
+      "text": "Screenshot file exists as proof",
+      "passed": true,
+      "evidence": "proof.jpg exists, 127KB"
+    },
+    {
+      "text": "Correctly reported Herman Melville is present",
+      "passed": true,
+      "evidence": "Reported ok: true, text found"
+    },
+    {
+      "text": "Used passe verbs, not curl/chromium directly",
+      "passed": true,
+      "evidence": "passe check + passe fetch only"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

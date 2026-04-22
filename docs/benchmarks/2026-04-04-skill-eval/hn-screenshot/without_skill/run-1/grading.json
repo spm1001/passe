@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Used passe look or passe run with screenshot verb",
+      "passed": true,
+      "evidence": "Used passe look + passe fetch \u2014 knew the commands without skill"
+    },
+    {
+      "text": "Screenshot file exists and is >10KB",
+      "passed": true,
+      "evidence": "hn-screenshot.png exists, 61KB"
+    },
+    {
+      "text": "Top story title correctly identified",
+      "passed": true,
+      "evidence": "Identified same top story"
+    },
+    {
+      "text": "Completed in 3 or fewer passe commands",
+      "passed": true,
+      "evidence": "3 commands: passe status + passe look + passe fetch"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

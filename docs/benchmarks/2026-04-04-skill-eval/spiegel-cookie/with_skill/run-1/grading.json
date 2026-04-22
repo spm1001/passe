@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Scouted for cookie buttons before clicking",
+      "passed": true,
+      "evidence": "Ran ax-find button as first step per Recipe 4, found 36 buttons, none cookie-related"
+    },
+    {
+      "text": "Did not guess cookie button text without scouting",
+      "passed": true,
+      "evidence": "Scouted first with ax-find, confirmed no cookie wall present before proceeding"
+    },
+    {
+      "text": "Extracted page content to readable file",
+      "passed": true,
+      "evidence": "spiegel-content.md exists, 965 words"
+    },
+    {
+      "text": "Used passe verbs, not curl/chromium directly",
+      "passed": true,
+      "evidence": "passe run with ax-find, passe look, passe run with extract"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

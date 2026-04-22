@@ -1,0 +1,41 @@
+{
+  "skill_name": "passe",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "Can you screenshot https://news.ycombinator.com and tell me what the top story is right now?",
+      "expected_output": "Screenshot saved, top story identified from page content.",
+      "files": [],
+      "assertions": [
+        {"text": "Used passe look or passe run with screenshot verb, not curl/chromium directly", "type": "approach"},
+        {"text": "Screenshot file exists and is >10KB", "type": "output"},
+        {"text": "Top story title correctly identified in response", "type": "correctness"},
+        {"text": "Completed in 3 or fewer passe commands", "type": "efficiency"}
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "I need to read this article but there's a cookie wall: https://www.spiegel.de/international/. Can you get past it and get me the content?",
+      "expected_output": "Cookie wall scouted (or detected absent), content extracted.",
+      "files": [],
+      "assertions": [
+        {"text": "Scouted for cookie buttons before clicking (ax-find, snapshot, or screenshot inspection)", "type": "approach"},
+        {"text": "Did not guess cookie button text without scouting first", "type": "anti-pattern"},
+        {"text": "Extracted page content to a readable file", "type": "output"},
+        {"text": "Used passe verbs, not curl/requests/chromium directly", "type": "approach"}
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Can you check https://httpbin.org/html exists and has the text 'Herman Melville' on it? I want a screenshot as proof too.",
+      "expected_output": "Verification result (pass/fail), screenshot saved as proof.",
+      "files": [],
+      "assertions": [
+        {"text": "Used passe check with --contains or passe run with assert verb", "type": "approach"},
+        {"text": "Screenshot file exists as proof", "type": "output"},
+        {"text": "Correctly reported that 'Herman Melville' is present", "type": "correctness"},
+        {"text": "Used passe verbs, not curl/chromium directly", "type": "approach"}
+      ]
+    }
+  ]
+}

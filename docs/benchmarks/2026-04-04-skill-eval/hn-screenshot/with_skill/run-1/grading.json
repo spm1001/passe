@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Used passe look or passe run with screenshot verb",
+      "passed": true,
+      "evidence": "Used passe look for screenshot, passe fetch for content"
+    },
+    {
+      "text": "Screenshot file exists and is >10KB",
+      "passed": true,
+      "evidence": "hn-screenshot.jpg exists, 61KB"
+    },
+    {
+      "text": "Top story title correctly identified",
+      "passed": true,
+      "evidence": "Identified 'Tell HN: Anthropic no longer allowing Claude Code subscriptions to use OpenClaw'"
+    },
+    {
+      "text": "Completed in 3 or fewer passe commands",
+      "passed": true,
+      "evidence": "2 commands: passe look + passe fetch"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

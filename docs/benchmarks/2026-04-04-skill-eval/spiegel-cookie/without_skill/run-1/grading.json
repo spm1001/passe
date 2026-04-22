@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Scouted for cookie buttons before clicking",
+      "passed": true,
+      "evidence": "Checked with passe eval for consent/cookie DOM elements, inspected screenshots"
+    },
+    {
+      "text": "Did not guess cookie button text without scouting",
+      "passed": true,
+      "evidence": "Did not attempt blind click \u2014 checked DOM and screenshots first"
+    },
+    {
+      "text": "Extracted page content to readable file",
+      "passed": true,
+      "evidence": "04-page-content.md (965 words) and 06-article-content.md (1813 words)"
+    },
+    {
+      "text": "Used passe verbs, not curl/chromium directly",
+      "passed": true,
+      "evidence": "Used passe throughout \u2014 look, run, eval, read, tabs close"
+    }
+  ],
+  "summary": {
+    "pass_rate": 1.0,
+    "passed": 4,
+    "failed": 0,
+    "total": 4
+  }
+}

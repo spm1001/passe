@@ -1,0 +1,30 @@
+{
+  "expectations": [
+    {
+      "text": "Used passe check with --contains or passe run with assert",
+      "passed": false,
+      "evidence": "Used curl + grep for text check, not passe check or assert"
+    },
+    {
+      "text": "Screenshot file exists as proof",
+      "passed": true,
+      "evidence": "httpbin_screenshot.png exists, 189KB"
+    },
+    {
+      "text": "Correctly reported Herman Melville is present",
+      "passed": true,
+      "evidence": "Correctly identified text via grep"
+    },
+    {
+      "text": "Used passe verbs, not curl/chromium directly",
+      "passed": false,
+      "evidence": "Used curl for fetch and chromium --headless --screenshot directly"
+    }
+  ],
+  "summary": {
+    "pass_rate": 0.5,
+    "passed": 2,
+    "failed": 2,
+    "total": 4
+  }
+}

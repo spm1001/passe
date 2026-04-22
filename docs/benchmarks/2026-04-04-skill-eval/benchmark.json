@@ -1,0 +1,293 @@
+{
+  "metadata": {
+    "skill_name": "passe",
+    "skill_path": "<path/to/skill>",
+    "executor_model": "<model-name>",
+    "analyzer_model": "<model-name>",
+    "timestamp": "2026-04-04T04:39:09Z",
+    "evals_run": [
+      0,
+      1,
+      2
+    ],
+    "runs_per_configuration": 3
+  },
+  "runs": [
+    {
+      "eval_id": 0,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 41.3,
+        "tokens": 20878,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Used passe look or passe run with screenshot verb",
+          "passed": true,
+          "evidence": "Used passe look for screenshot, passe fetch for content"
+        },
+        {
+          "text": "Screenshot file exists and is >10KB",
+          "passed": true,
+          "evidence": "hn-screenshot.jpg exists, 61KB"
+        },
+        {
+          "text": "Top story title correctly identified",
+          "passed": true,
+          "evidence": "Identified 'Tell HN: Anthropic no longer allowing Claude Code subscriptions to use OpenClaw'"
+        },
+        {
+          "text": "Completed in 3 or fewer passe commands",
+          "passed": true,
+          "evidence": "2 commands: passe look + passe fetch"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 69.7,
+        "tokens": 28685,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Scouted for cookie buttons before clicking",
+          "passed": true,
+          "evidence": "Ran ax-find button as first step per Recipe 4, found 36 buttons, none cookie-related"
+        },
+        {
+          "text": "Did not guess cookie button text without scouting",
+          "passed": true,
+          "evidence": "Scouted first with ax-find, confirmed no cookie wall present before proceeding"
+        },
+        {
+          "text": "Extracted page content to readable file",
+          "passed": true,
+          "evidence": "spiegel-content.md exists, 965 words"
+        },
+        {
+          "text": "Used passe verbs, not curl/chromium directly",
+          "passed": true,
+          "evidence": "passe run with ax-find, passe look, passe run with extract"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 41.8,
+        "tokens": 21656,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Used passe check with --contains or passe run with assert",
+          "passed": true,
+          "evidence": "Used passe check --contains 'Herman Melville' --screenshot"
+        },
+        {
+          "text": "Screenshot file exists as proof",
+          "passed": true,
+          "evidence": "proof.jpg exists, 127KB"
+        },
+        {
+          "text": "Correctly reported Herman Melville is present",
+          "passed": true,
+          "evidence": "Reported ok: true, text found"
+        },
+        {
+          "text": "Used passe verbs, not curl/chromium directly",
+          "passed": true,
+          "evidence": "passe check + passe fetch only"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 0,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 46.0,
+        "tokens": 24025,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Used passe look or passe run with screenshot verb",
+          "passed": true,
+          "evidence": "Used passe look + passe fetch \u2014 knew the commands without skill"
+        },
+        {
+          "text": "Screenshot file exists and is >10KB",
+          "passed": true,
+          "evidence": "hn-screenshot.png exists, 61KB"
+        },
+        {
+          "text": "Top story title correctly identified",
+          "passed": true,
+          "evidence": "Identified same top story"
+        },
+        {
+          "text": "Completed in 3 or fewer passe commands",
+          "passed": true,
+          "evidence": "3 commands: passe status + passe look + passe fetch"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 309.5,
+        "tokens": 34948,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Scouted for cookie buttons before clicking",
+          "passed": true,
+          "evidence": "Checked with passe eval for consent/cookie DOM elements, inspected screenshots"
+        },
+        {
+          "text": "Did not guess cookie button text without scouting",
+          "passed": true,
+          "evidence": "Did not attempt blind click \u2014 checked DOM and screenshots first"
+        },
+        {
+          "text": "Extracted page content to readable file",
+          "passed": true,
+          "evidence": "04-page-content.md (965 words) and 06-article-content.md (1813 words)"
+        },
+        {
+          "text": "Used passe verbs, not curl/chromium directly",
+          "passed": true,
+          "evidence": "Used passe throughout \u2014 look, run, eval, read, tabs close"
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.5,
+        "passed": 2,
+        "failed": 2,
+        "total": 4,
+        "time_seconds": 47.4,
+        "tokens": 17571,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "Used passe check with --contains or passe run with assert",
+          "passed": false,
+          "evidence": "Used curl + grep for text check, not passe check or assert"
+        },
+        {
+          "text": "Screenshot file exists as proof",
+          "passed": true,
+          "evidence": "httpbin_screenshot.png exists, 189KB"
+        },
+        {
+          "text": "Correctly reported Herman Melville is present",
+          "passed": true,
+          "evidence": "Correctly identified text via grep"
+        },
+        {
+          "text": "Used passe verbs, not curl/chromium directly",
+          "passed": false,
+          "evidence": "Used curl for fetch and chromium --headless --screenshot directly"
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 1.0,
+        "stddev": 0.0,
+        "min": 1.0,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 50.9333,
+        "stddev": 16.2543,
+        "min": 41.3,
+        "max": 69.7
+      },
+      "tokens": {
+        "mean": 23739.6667,
+        "stddev": 4300.4142,
+        "min": 20878,
+        "max": 28685
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.8333,
+        "stddev": 0.2887,
+        "min": 0.5,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 134.3,
+        "stddev": 151.7293,
+        "min": 46.0,
+        "max": 309.5
+      },
+      "tokens": {
+        "mean": 25514.6667,
+        "stddev": 8783.7556,
+        "min": 17571,
+        "max": 34948
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.17",
+      "time_seconds": "-83.4",
+      "tokens": "-1775"
+    }
+  },
+  "notes": []
+}
