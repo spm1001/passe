@@ -14,6 +14,8 @@ Content extraction follows a four-layer escalation: content-type sniff, framewor
 
 Trafilatura is the benchmark leader (F1 0.958). The readability-lxml + markdownify middle tier was tested (31 fixtures, 7 categories) and scored 0.648 vs trafilatura's 0.846 — it loses on every category. Don't re-propose it; the data is in `tests/bench/`. Revisit only if a specific page type emerges where readability wins.
 
+Known trafilatura failure mode (passe-lajesa, 2026-05-20): on pages where `<pre><code>` elements exist in the DOM but are empty (Angular `<app-code-snippet>`-style components that render code via syntax-highlighter side-effects, or hold it in component state), trafilatura silently emits nothing for those blocks — no warning. The structural quality gate counts pipe-table rows and code fences and falls back to Readability if structure is lost, but empty-`<code>` is *not* a structural drop — trafilatura "correctly" extracted nothing from empty elements. The deeper recipe for documentation SPAs is `capture --bodies` to find the source `.md`/`.json` the SPA fetches, not better DOM extraction. The Antigravity scrape took 5 seconds via `/assets/docs/<section>/<page>.md` after 30 minutes of failed DOM-based attempts.
+
 The quality gate uses composite scoring: word count, stop words ratio (jusText thresholds), link density (Boilerpipe's 0.33 threshold), text-to-HTML ratio, and paywall/CAPTCHA/cookie-consent detection. Thresholds (0.35 composite, 50 min words, 0.20 stop words, 0.33 link density) were tuned against the corpus once — two bugs found (CAPTCHA false positives on Wikipedia, stop words penalty on large technical docs). A systematic threshold sweep using the bench harness is possible but hasn't been done.
 
 ## Testing Landmines
