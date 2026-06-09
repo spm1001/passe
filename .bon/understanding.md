@@ -85,3 +85,7 @@ Passe is wide and stateless-per-call. That's the right design for the speed clai
 Subcommands (`fetch`, `look`, `check`, `screenshot`, `eval`, `capture`, `tabs`) are the path of least resistance for atomic agent operations. `passe run` is for genuinely multi-step compositions. When verbs have analogous subcommand forms, the cookbook should lead with the subcommand and treat `run` as the advanced path. "Did you mean?" hints, per-verb `--help`, and SKILL.md ordering are all surfaces where this principle gets enforced or eroded.
 
 Compared to kuri's stateful CLI (`use → go → snap → click eN`), passe's atomic-per-call model is faster but harder to think in. The mitigation isn't to abandon the model — it's to make the obvious path the right path more often.
+
+## Portfolio status (2026-06-09 audit)
+
+Repo dormant (no src commits since 2026-04-22) but the *itch is live*: Sameer frames passe as part of "making it easy for Claude to read stuff on my behalf, including stuff gated by Turnstile or similar hostile tech". passe-partout's v2 appliance (logged-in profile, home IP) is the same thread. Backlog grooming deliberately deferred to the coming batterie reshape (bds-hifusu, Cornichon-driven). Freshest resumable thread: lajesa/ropuze/pedute (fetch code-block work, 2026-05-20).
