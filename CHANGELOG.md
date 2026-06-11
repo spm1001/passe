@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.1] - 2026-06-11
+
+Packaging-only: the batterie assembler now vendors top-level `scripts/` for all skill plugins (bon/trousse breakage fix); passe's dev scripts ride along for parity. No functional change.
+
 ## [0.3.0] - 2026-03-18
 
 Batterie-wide consistency pass: docs consolidation, CI, versioning.

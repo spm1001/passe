@@ -1,6 +1,6 @@
 {
   "name": "passe",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Fast browser automation via Chrome DevTools Protocol. Requires: passe CLI (uv tool install passe), Chrome with CDP",
   "author": {
     "name": "Sameer Modha",
