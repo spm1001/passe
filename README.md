@@ -54,8 +54,10 @@ The model call to *write* the script is the same cost regardless. The difference
 ## Install
 
 ```bash
-uv tool install passe
+uv tool install 'passe @ git+https://github.com/spm1001/passe'
 ```
+
+(Or `uv tool install ~/repos/spm1001/passe` from a local clone. Passe is not published to PyPI, so a bare `uv tool install passe` won't resolve.)
 
 Requires Python 3.11+ and Chrome/Chromium with `--remote-debugging-port=9222`. Passe auto-starts a debug Chrome instance if none is running.
 

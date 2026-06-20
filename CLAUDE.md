@@ -316,10 +316,11 @@ The daemon (`log_daemon.py`) runs as a detached process with its own WebSocket t
 ## Development
 
 ```bash
-# After editing code, reinstall (the --reinstall flag forces wheel rebuild)
-uv tool install /Users/modha/Repos/passe --force --reinstall
+# After editing code, reinstall (--reinstall + --no-cache force a wheel rebuild)
+uv tool install ~/repos/spm1001/passe --force --reinstall --no-cache
 
-# Without --reinstall, uv may use a cached wheel with old code
+# Without --no-cache, uv may reuse a cached wheel with old code (a version-only
+# bump leaves the source byte-identical, so the cached build never moves)
 ```
 
 ## Architecture
