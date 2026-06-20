@@ -2,6 +2,8 @@
 
 Passe is a CDP browser automation CLI that connects Claude to Chrome via raw WebSocket. Its 100x speed advantage over MCP-based alternatives comes from eliminating model round-trips — everything happens in a single Bash call. It has become the single web content tool across all Claude sessions; mise dropped its web fetching path to end the "which tool?" confusion.
 
+**Not the browser appliance — that's `passe-partout`.** The logged-in, bot-evading *appliance* (real Chrome on kube's GPU + the `passe-kube-tunnel` user service + profiles, reached at `localhost:9222`) lives in a SEPARATE repo, `spm1001/passe-partout`. This repo is the CLI *tool* only — verbs, the DSL, extraction/`fetch`, the log daemon. Decision rule: changing how the `passe` *command* behaves → here; changing the *browser* it drives, where it runs, or what it's logged into → `passe-partout`. (A session that opened `passe` expecting the appliance burned a lot of time on 2026-06-20.)
+
 ## Grammar Philosophy
 
 The DSL was overhauled in March 2026 following a usability audit of 3,880 real invocations across 458 sessions. The governing principle: if every Claude writes it a certain way unprompted, that's the correct grammar. A naive-Claude survey (n=43) confirmed model instincts align with `goto` (81%), `wait` (100%), `click "text"` (100%), and `extract` over `read` (100%). Dead verbs with zero real usage (`click-if`, `wait-navigation`, `click-text`) were removed. `wait` collapsed three verbs into one (sleep/selector/network-idle by argument shape). All user-facing timeouts are seconds, never milliseconds.
