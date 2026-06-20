@@ -14,7 +14,9 @@ ISSUES=""
 if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/pyproject.toml" ]; then
     INSTALL_SRC="$PLUGIN_ROOT"
 else
-    INSTALL_SRC="passe"
+    # Vendored marketplace plugin ships no pyproject.toml (post-2026-06-10 cutover),
+    # so install from the source repo over git — the bare name is not published on PyPI.
+    INSTALL_SRC="passe @ git+https://github.com/spm1001/passe"
 fi
 
 # Check 1: CLI missing → auto-install

@@ -1,7 +1,7 @@
 {
   "name": "passe",
-  "version": "0.6.1",
-  "description": "Fast browser automation via Chrome DevTools Protocol. Requires: passe CLI (uv tool install passe), Chrome with CDP",
+  "version": "0.6.2",
+  "description": "Fast browser automation via Chrome DevTools Protocol. Requires: passe CLI (auto-installed on first session), Chrome with CDP",
   "author": {
     "name": "Sameer Modha",
     "url": "https://github.com/spm1001"
