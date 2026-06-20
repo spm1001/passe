@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.6.3] - 2026-06-20
+
+`ensure-passe.sh` auto-update is now diagnosable: installs run with `--no-cache` (a plugin.json-only bump leaves `src/` byte-identical, so without it uv reuses the cached build and the version never moves), and install/update stderr is captured to `~/.cache/passe/auto-update.log` — the log path and a `--no-cache` recovery command are surfaced on failure instead of a bare "auto-update failed." Propagated from bon (bon-babuse / bon-mavemi).
+
 ## [0.6.1] - 2026-06-11
 
 Packaging-only: the batterie assembler now vendors top-level `scripts/` for all skill plugins (bon/trousse breakage fix); passe's dev scripts ride along for parity. No functional change.
