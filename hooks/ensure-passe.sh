@@ -1,6 +1,9 @@
 #!/bin/bash
-# SessionStart hook: ensure passe CLI is available and version-aligned.
-# Auto-fixes drift; reports what it did. Silent when everything is fine.
+# SessionStart hook: ensure passe CLI is available. Install-if-MISSING only —
+# no version-drift check here. Post single-version cutover the vendored
+# plugin.json carries the stamped SUITE version, not passe's own, so any
+# version comparison at session start is structurally false (bds-japoca).
+# Freshness is /batterie:update's job (commit-based). Silent when fine.
 
 # Skip for subagent invocations (fork bomb prevention)
 [ -n "${CLAUDE_SUBAGENT:-}" ] && exit 0
@@ -23,31 +26,16 @@ else
     INSTALL_SRC="passe @ git+https://github.com/spm1001/passe"
 fi
 
-# Check 1: CLI missing → auto-install
+# Check 1: CLI missing → auto-install.
+# Report the version that ACTUALLY landed (re-read post-install), never an
+# expected number — the old hook claimed the plugin.json version without
+# checking, and misreported every session (bds-zelowe).
 if ! command -v passe &>/dev/null; then
     if uv tool install "$INSTALL_SRC" --force --reinstall --no-cache >"$UPDATE_LOG" 2>&1; then
-        FIXED="${FIXED}• passe CLI installed\n"
+        LANDED=$(passe --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+        FIXED="${FIXED}• passe CLI installed (v${LANDED})\n"
     else
         ISSUES="${ISSUES}• passe CLI not found and auto-install failed (full error: ${UPDATE_LOG}). Run manually:\n\n  uv tool install \"$INSTALL_SRC\" --force --reinstall --no-cache\n"
-    fi
-fi
-
-# Check 2: version drift → auto-update
-if [ -z "$ISSUES" ] && command -v passe &>/dev/null; then
-    if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/.claude-plugin/plugin.json" ]; then
-        INSTALLED=$(passe --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
-        EXPECTED=$(python3 -c "import json; print(json.load(open('$PLUGIN_ROOT/.claude-plugin/plugin.json'))['version'])" 2>/dev/null || true)
-        if [ -n "$INSTALLED" ] && [ -n "$EXPECTED" ] && [ "$INSTALLED" != "$EXPECTED" ]; then
-            # Only auto-upgrade (CLI behind plugin). CLI ahead = dev installed from repo, don't downgrade.
-            CLI_BEHIND=$(python3 -c "print(tuple(int(x) for x in '$INSTALLED'.split('.')) < tuple(int(x) for x in '$EXPECTED'.split('.')))" 2>/dev/null || true)
-            if [ "$CLI_BEHIND" = "True" ]; then
-                if uv tool install "$INSTALL_SRC" --force --reinstall --no-cache >"$UPDATE_LOG" 2>&1; then
-                    FIXED="${FIXED}• passe CLI updated: v${INSTALLED} → v${EXPECTED}\n"
-                else
-                    ISSUES="${ISSUES}• passe CLI is v${INSTALLED} but plugin is v${EXPECTED}. Auto-update failed (full error: ${UPDATE_LOG}). Run manually:\n\n  uv tool install \"$INSTALL_SRC\" --force --reinstall --no-cache\n"
-                fi
-            fi
-        fi
     fi
 fi
 
