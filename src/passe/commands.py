@@ -235,8 +235,15 @@ async def cmd_fetch(url: str, path: str = None,
     explicit_path = path is not None
 
     # --- HTTP fast-path: try before Chrome ---
-    # Skip if: device emulation needed, or source forces browser-side extraction
-    if not device and source not in ('readability', 'innertext'):
+    # Skip if: device emulation needed, or source forces browser-side extraction.
+    # fast_path_reason records why Chrome took over — no silent attempts
+    # (passe-nopiku).
+    fast_path_reason = None
+    if device:
+        fast_path_reason = 'skipped: device emulation needs Chrome'
+    elif source in ('readability', 'innertext'):
+        fast_path_reason = f'skipped: --source {source} is browser-side'
+    else:
         from passe.fastpath import try_http_fetch
         fp_result = try_http_fetch(url, force_source=source)
         if fp_result and fp_result.quality_score >= 0.35 and not fp_result.escalate_reason:
@@ -272,6 +279,9 @@ async def cmd_fetch(url: str, path: str = None,
             _emit_summary(summary)
             print(json.dumps(summary))
             return
+        fast_path_reason = (fp_result.escalate_reason
+                            if fp_result and fp_result.escalate_reason
+                            else 'unknown')
 
     async with connect() as (client, conn_info):
         await client.create_tab()
@@ -296,6 +306,8 @@ async def cmd_fetch(url: str, path: str = None,
                 'ok': True, 'steps': 1, 'total_ms': ms,
                 'cdp': conn_info['cdp'],
                 'browser': conn_info['browser'],
+                'fast_path': False,
+                'fast_path_reason': fast_path_reason,
             }
             if result.get('nav_url'):
                 summary['final_url'] = result['nav_url']
@@ -335,6 +347,8 @@ async def cmd_fetch(url: str, path: str = None,
                 'verb': 'fetch', 'error': str(exc),
                 'cdp': conn_info['cdp'],
                 'browser': conn_info['browser'],
+                'fast_path': False,
+                'fast_path_reason': fast_path_reason,
             }
             _emit_summary(summary)
             print(json.dumps(summary))

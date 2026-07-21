@@ -591,6 +591,16 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
 
     t0 = time.monotonic()
 
+    def _escalate(reason: str, esc_url: str = None) -> FastPathResult:
+        """Reason-carrying escalation — Chrome takes over, and the summary
+        can say why the fast-path didn't serve (passe-nopiku)."""
+        return FastPathResult(
+            markdown='', url=esc_url or url, source='http',
+            quality_score=0.0, word_count=0,
+            fetch_ms=round((time.monotonic() - t0) * 1000, 1),
+            escalate_reason=reason,
+        )
+
     # --- HTTP fetch ---
     try:
         with httpx.Client(
@@ -604,7 +614,7 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
             resp = client.get(url)
     except (httpx.HTTPError, httpx.TimeoutException) as exc:
         print(f'[fetch] HTTP fast-path failed: {exc}', file=sys.stderr)
-        return None
+        return _escalate(f'http_error: {exc.__class__.__name__}')
 
     fetch_ms = round((time.monotonic() - t0) * 1000, 1)
     final_url = str(resp.url)
@@ -613,7 +623,7 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     # --- Auth/error status ---
     if resp.status_code in (401, 403):
         print(f'[fetch] HTTP {resp.status_code} — escalating to Chrome', file=sys.stderr)
-        return None
+        return _escalate(f'http_{resp.status_code}', final_url)
     if resp.status_code >= 400:
         print(f'[fetch] HTTP {resp.status_code} — not retrying', file=sys.stderr)
         return FastPathResult(
@@ -666,7 +676,7 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
         if md_result:
             return md_result
         print(f'[fetch] {spa_shell} detected — escalating to Chrome', file=sys.stderr)
-        return None
+        return _escalate(f'spa_shell: {spa_shell}', final_url)
 
     # --- Apple Developer Documentation shortcut ---
     apple_match = re.match(
@@ -697,7 +707,7 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     # --- CAPTCHA detection — escalate (Chrome may have solved challenge) ---
     if _detect_captcha(html):
         print(f'[fetch] CAPTCHA detected — escalating to Chrome', file=sys.stderr)
-        return None
+        return _escalate('captcha_detected', final_url)
 
     # --- __NEXT_DATA__ shortcut ---
     if force_source is None or force_source == 'next-data':
@@ -723,14 +733,14 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
         )
     except Exception as exc:
         print(f'[fetch] trafilatura failed: {exc}', file=sys.stderr)
-        return None
+        return _escalate(f'trafilatura_error: {exc.__class__.__name__}', final_url)
 
     if not extracted:
         md_result = _probe_markdown('empty_extraction', guess=True)
         if md_result:
             return md_result
         print('[fetch] trafilatura returned empty — escalating to Chrome', file=sys.stderr)
-        return None
+        return _escalate('empty_extraction', final_url)
 
     # --- Quality gate ---
     score, signals = quality_gate(extracted, html, final_url)
