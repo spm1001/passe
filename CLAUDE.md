@@ -362,3 +362,5 @@ When a `wait_for_event` waiter is active, events go directly to the waiter. When
 `CDPClient` has a non-consuming network event collector that runs in `_receiver` before waiter/queue routing. When `enable_network()` is called, `Network.requestWillBeSent`, `responseReceived`, `requestWillBeSentExtraInfo`, `responseReceivedExtraInfo`, `loadingFinished`, and `loadingFailed` events are correlated by `requestId` into `_network_requests`. ExtraInfo events enrich headers (e.g. Cookie, Set-Cookie) that Chrome omits from the base events. Wall-clock timing (`timing_ms`) is computed from `time.monotonic()` deltas between request and completion. `enable_network(large_buffers=True)` passes large buffer params so Chrome retains response bodies for `getResponseBody`. The collector doesn't consume events — they still flow to waiters and queues, so network idle detection (bare `wait`) coexists on the same event stream.
 
 No external dependencies beyond `websockets` (and `trafilatura` for content extraction). Everything else runs in Chrome's V8.
+
+Work is tracked on a bon board in `.bon/` — read `.bon/README.md` before reading or changing anything there.
