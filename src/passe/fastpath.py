@@ -129,6 +129,105 @@ def _docs_shaped(url: str) -> bool:
             or '/docs/' in parts.path)
 
 
+# --- llms.txt index (the spec's own discovery channel) ---
+# Root /llms.txt lists every .md page (platform.claude.com: 541 entries).
+# Parsed once per host per cache window, persisted to disk, then used as a
+# lookup table — exact answers, including .html pages with .md twins that
+# URL+'.md' guessing can never find.
+
+LLMS_INDEX_DIR = None  # resolved lazily; tests patch this
+_LLMS_MAX_BYTES = 2_000_000
+
+
+def _llms_index_file(host: str):
+    from pathlib import Path
+    base = LLMS_INDEX_DIR or Path.home() / '.passe' / 'llms-index'
+    return base / (host.replace(':', '_') + '.json')
+
+
+def _page_key(path: str) -> str:
+    """Normalize a page path for index matching: strip trailing slash and
+    a .html/.htm extension (asyncio.html's twin is asyncio.md)."""
+    path = path.rstrip('/')
+    for ext in ('.html', '.htm'):
+        if path.endswith(ext):
+            return path[:-len(ext)]
+    return path
+
+
+def _parse_llms_index(text: str, base_url: str) -> dict:
+    """Harvest .md links from llms.txt → {page_key: md_url}.
+
+    Entries are markdown links or bare URLs, absolute or root-relative.
+    Keys are the md path minus its .md suffix — the page it shadows."""
+    from urllib.parse import urljoin, urlsplit
+    mapping = {}
+    # Leading boundary is start-of-line, whitespace, or an opening
+    # bracket — a plain \b can't match between '(' and '/'.
+    for match in re.finditer(
+            r'(?:^|[\s(<])((?:https?://|/)[^\s()<>]+\.md)\b',
+            text, re.MULTILINE):
+        md_url = urljoin(base_url, match.group(1))
+        key = _page_key(urlsplit(md_url).path[:-3])
+        if key:
+            mapping[key] = md_url
+    return mapping
+
+
+def _load_llms_index(host: str) -> dict | None:
+    """Fresh on-disk index for this host, or None."""
+    import json as json_mod
+    try:
+        with open(_llms_index_file(host)) as f:
+            data = json_mod.load(f)
+        if time.time() - data.get('ts', 0) > _PROBE_CACHE_TTL:
+            return None
+        return data.get('map', {})
+    except Exception:
+        return None
+
+
+def _fetch_llms_index(final_url: str) -> dict | None:
+    """GET root /llms.txt; parse and persist the index. None if absent.
+
+    Same shell-guard as .md candidates — SPAs serve HTML on every path,
+    including /llms.txt."""
+    import httpx
+    import json as json_mod
+    from urllib.parse import urlsplit
+    parts = urlsplit(final_url)
+    llms_url = f'{parts.scheme}://{parts.netloc}/llms.txt'
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=15.0,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; passe/1.0)'},
+        ) as client:
+            resp = client.get(llms_url)
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
+    if resp.status_code != 200:
+        return None
+    ctype = resp.headers.get('content-type', '').split(';')[0].strip().lower()
+    if ctype not in _MARKDOWN_CONTENT_TYPES:
+        return None
+    text = resp.text[:_LLMS_MAX_BYTES]
+    head = text.lstrip()[:100].lower()
+    if head.startswith('<!doctype') or head.startswith('<html'):
+        return None
+    mapping = _parse_llms_index(text, llms_url)
+    if not mapping:
+        return None
+    try:
+        path = _llms_index_file(parts.netloc)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w') as f:
+            json_mod.dump({'ts': time.time(), 'map': mapping}, f)
+    except Exception:
+        pass
+    return mapping
+
+
 @dataclass
 class FastPathResult:
     """Result from the HTTP fast-path."""
@@ -394,6 +493,85 @@ def quality_gate(markdown: str, html: str, url: str) -> tuple[float, dict]:
     return score, signals
 
 
+def _run_markdown_probe(html: str, final_url: str, force_source: str | None,
+                        t0: float, reason: str, guess: bool):
+    """Find and fetch a canonical markdown source for this page.
+
+    guess=False: advertised <link> tag only (every HTML fetch, no
+    speculation). guess=True (docs-shaped / known-positive / escalation):
+    a three-rung ladder — on-disk llms.txt index (exact, free), URL+'.md'
+    sibling guess, then root /llms.txt fetch-and-index. Host verdicts are
+    cached; a host with an llms.txt index stays probe-eligible even when
+    one page misses.
+    """
+    from urllib.parse import urlsplit
+    if force_source is not None:
+        return None
+
+    def _result(md_text: str, md_url: str, via: str):
+        wc = _count_words(md_text)
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        print(f'[fetch] markdown source ({via}): {md_url} '
+              f'({wc} words, {elapsed}ms)', file=sys.stderr)
+        return FastPathResult(
+            markdown=md_text, url=final_url, source='markdown_probe',
+            quality_score=1.0, word_count=wc, fetch_ms=elapsed,
+            content_type='text/markdown',
+        )
+
+    if not guess:
+        md_url = _markdown_source_url(html, final_url, guess=False)
+        if not md_url:
+            return None
+        md_text = _fetch_markdown_candidate(md_url)
+        return _result(md_text, md_url, reason) if md_text else None
+
+    parts = urlsplit(final_url)
+    host = parts.netloc
+    if _probe_cache_get(host) is False:
+        return None  # host known not to serve markdown sources
+
+    page_key = _page_key(parts.path)
+
+    # Rung 1: on-disk llms.txt index — exact answer, zero extra requests
+    index = _load_llms_index(host)
+    if index:
+        md_url = index.get(page_key)
+        if md_url:
+            md_text = _fetch_markdown_candidate(md_url)
+            if md_text:
+                _probe_cache_set(host, True)
+                return _result(md_text, md_url, 'llms.txt index')
+
+    # Rung 2: URL + '.md' sibling guess
+    md_url = _markdown_source_url(html, final_url, guess=True)
+    if md_url:
+        md_text = _fetch_markdown_candidate(md_url)
+        if md_text:
+            _probe_cache_set(host, True)
+            return _result(md_text, md_url, reason)
+
+    # Rung 3: root /llms.txt — the spec's own discovery channel
+    if index is None:
+        index = _fetch_llms_index(final_url)
+        if index:
+            md_url = index.get(page_key)
+            if md_url:
+                md_text = _fetch_markdown_candidate(md_url)
+                if md_text:
+                    _probe_cache_set(host, True)
+                    return _result(md_text, md_url, 'llms.txt index')
+
+    if index:
+        # Host serves markdown sources; this page just isn't among them.
+        # Keep the host probe-eligible for its other pages.
+        _probe_cache_set(host, True)
+    else:
+        _probe_cache_set(host, False)
+        print(f'[fetch] no markdown source for {final_url}', file=sys.stderr)
+    return None
+
+
 # --- Raw content type detection (mirrors verbs.py RAW_CONTENT_TYPES) ---
 
 _RAW_CONTENT_TYPES = frozenset({
@@ -464,44 +642,16 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     # --- Canonical markdown source probe ---
     # The source file beats any HTML extraction. Advertised links are checked
     # on every HTML fetch (string scan, no extra request unless found);
-    # guessed URL.md probes fire only on escalation paths below.
+    # guessed/llms.txt probes fire only for docs-shaped URLs, known-positive
+    # hosts, and the escalation paths below.
     def _probe_markdown(reason: str, guess: bool) -> FastPathResult | None:
-        if force_source is not None:
-            return None
-        from urllib.parse import urlsplit
-        host = urlsplit(final_url).netloc
-        if guess and _probe_cache_get(host) is False:
-            return None  # host known not to serve .md siblings
-        md_url = _markdown_source_url(html, final_url, guess=guess)
-        if not md_url:
-            return None
-        md_text = _fetch_markdown_candidate(md_url)
-        if not md_text:
-            if guess:
-                _probe_cache_set(host, False)
-                print(f'[fetch] no markdown source at {md_url}',
-                      file=sys.stderr)
-            return None
-        if guess:
-            _probe_cache_set(host, True)
-        wc = _count_words(md_text)
-        elapsed = round((time.monotonic() - t0) * 1000, 1)
-        print(f'[fetch] markdown source ({reason}): {md_url} '
-              f'({wc} words, {elapsed}ms)', file=sys.stderr)
-        return FastPathResult(
-            markdown=md_text, url=final_url, source='markdown_probe',
-            quality_score=1.0, word_count=wc, fetch_ms=elapsed,
-            content_type='text/markdown',
-        )
+        return _run_markdown_probe(html, final_url, force_source, t0,
+                                   reason, guess)
 
     md_result = _probe_markdown('advertised', guess=False)
     if md_result:
         return md_result
 
-    # Unadvertised .md siblings (platform.claude.com et al): guess on
-    # docs-shaped URLs, and on any host the cache knows serves them.
-    # The known-negative guard inside _probe_markdown keeps the tax off
-    # .md-less docs sites after first contact.
     from urllib.parse import urlsplit as _urlsplit
     if _docs_shaped(final_url) or _probe_cache_get(
             _urlsplit(final_url).netloc) is True:

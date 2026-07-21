@@ -21,9 +21,11 @@ from passe.fastpath import (
 
 @pytest.fixture(autouse=True)
 def _isolated_probe_cache(tmp_path, monkeypatch):
-    """Point the host cache at a per-test file — never at ~/.passe."""
+    """Point host cache and llms index at per-test dirs — never ~/.passe."""
     monkeypatch.setattr(fastpath, 'PROBE_CACHE_PATH',
                         tmp_path / 'md-hosts.json')
+    monkeypatch.setattr(fastpath, 'LLMS_INDEX_DIR',
+                        tmp_path / 'llms-index')
 
 
 PAGE_URL = 'https://site.test/docs/page'
@@ -256,3 +258,100 @@ class TestTryHttpFetchProbe:
         assert MD_URL not in calls
         if result is not None:
             assert result.source != 'markdown_probe'
+
+
+KB_PAGE = 'https://kb.test/notes/article.html'
+KB_PAGE_MD = 'https://kb.test/notes/article.md'
+KB_LLMS = 'https://kb.test/llms.txt'
+KB_LLMS_BODY = (
+    '# KB docs\n\n'
+    '- [Article](https://kb.test/notes/article.md) - the article\n'
+    '- [Other](/notes/other.md): relative entry\n'
+    'Bare: https://kb.test/notes/third.md\n'
+)
+
+
+class TestParseLlmsIndex:
+    def test_absolute_relative_and_bare_entries(self):
+        mapping = fastpath._parse_llms_index(KB_LLMS_BODY, KB_LLMS)
+        assert mapping['/notes/article'] == KB_PAGE_MD
+        assert mapping['/notes/other'] == 'https://kb.test/notes/other.md'
+        assert mapping['/notes/third'] == 'https://kb.test/notes/third.md'
+
+    def test_page_key_strips_html_extension(self):
+        assert fastpath._page_key('/notes/article.html') == '/notes/article'
+        assert fastpath._page_key('/notes/article/') == '/notes/article'
+        assert fastpath._page_key('/notes/article') == '/notes/article'
+
+
+class TestLlmsLookup:
+    def test_html_page_rescued_via_llms_index(self):
+        """The lookup's distinctive win: article.html's twin is article.md —
+        URL+'.md' guessing probes article.html.md and can never find it."""
+        calls = []
+        routes = {
+            KB_PAGE: _FakeResponse(KB_PAGE, text=THIN_HTML),
+            KB_LLMS: _FakeResponse(KB_LLMS, text=KB_LLMS_BODY,
+                                   ctype='text/plain'),
+            KB_PAGE_MD: _FakeResponse(KB_PAGE_MD, text=MD_BODY,
+                                      ctype='text/markdown'),
+        }
+        with _patched_httpx(routes, calls):
+            result = try_http_fetch(KB_PAGE)
+        assert result is not None
+        assert result.source == 'markdown_probe'
+        assert result.markdown == MD_BODY
+        # Ladder order: page, failed guess, llms.txt, exact md
+        assert calls == [KB_PAGE, KB_PAGE + '.md', KB_LLMS, KB_PAGE_MD]
+
+    def test_disk_index_reused_across_fetches(self):
+        """llms.txt is fetched once per host; later pages hit the disk index."""
+        other_page = 'https://kb.test/notes/other.html'
+        other_md = 'https://kb.test/notes/other.md'
+        calls = []
+        routes = {
+            KB_PAGE: _FakeResponse(KB_PAGE, text=THIN_HTML),
+            other_page: _FakeResponse(other_page, text=THIN_HTML),
+            KB_LLMS: _FakeResponse(KB_LLMS, text=KB_LLMS_BODY,
+                                   ctype='text/plain'),
+            KB_PAGE_MD: _FakeResponse(KB_PAGE_MD, text=MD_BODY,
+                                      ctype='text/markdown'),
+            other_md: _FakeResponse(other_md, text=MD_BODY,
+                                    ctype='text/markdown'),
+        }
+        with _patched_httpx(routes, calls):
+            first = try_http_fetch(KB_PAGE)
+            second = try_http_fetch(other_page)
+        assert first is not None and first.source == 'markdown_probe'
+        assert second is not None and second.source == 'markdown_probe'
+        assert calls.count(KB_LLMS) == 1
+        # Second fetch: page + exact md only — no guess, no llms refetch
+        assert calls[-2:] == [other_page, other_md]
+
+    def test_unlisted_page_keeps_host_probe_eligible(self):
+        """A miss on one page must not blacklist an llms-serving host."""
+        missing = 'https://kb.test/notes/missing.html'
+        calls = []
+        routes = {
+            missing: _FakeResponse(missing, text=THIN_HTML),
+            KB_LLMS: _FakeResponse(KB_LLMS, text=KB_LLMS_BODY,
+                                   ctype='text/plain'),
+        }
+        with _patched_httpx(routes, calls):
+            result = try_http_fetch(missing)
+        assert result is None or result.escalate_reason is not None
+        assert fastpath._probe_cache_get('kb.test') is True
+
+    def test_llms_html_shell_treated_as_absent(self):
+        """SPA shells served at /llms.txt must not poison the index."""
+        calls = []
+        routes = {
+            KB_PAGE: _FakeResponse(KB_PAGE, text=THIN_HTML),
+            KB_LLMS: _FakeResponse(
+                KB_LLMS, text='<!DOCTYPE html><html>shell</html>',
+                ctype='text/plain'),
+        }
+        with _patched_httpx(routes, calls):
+            result = try_http_fetch(KB_PAGE)
+        assert result is None or result.escalate_reason is not None
+        assert fastpath._probe_cache_get('kb.test') is False
