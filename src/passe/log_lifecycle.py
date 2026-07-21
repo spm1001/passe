@@ -125,6 +125,11 @@ def cmd_log_start(args: list[str], cdp_url: str | None = None):
     if not cdp_url:
         cdp_url = os.environ.get('PASSE_CDP')
 
+    # Scheme-less host:port → http:// (mirror of connection._normalize_endpoint;
+    # this module stays stdlib-only, so no passe import)
+    if cdp_url and '://' not in cdp_url:
+        cdp_url = f'http://{cdp_url}'
+
     # Pre-flight: verify Chrome is reachable before spawning
     if cdp_url:
         info = _check_chrome(cdp_url)

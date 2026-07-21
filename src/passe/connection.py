@@ -41,9 +41,22 @@ def set_cdp_override(url: str | None):
 
 
 
+def _normalize_endpoint(url: str) -> str:
+    """Prepend http:// to scheme-less endpoints — users type host:port.
+
+    Without this, urlparse reads 'localhost:9223' as scheme='localhost'
+    and urlopen rejects it as an unknown url type. Mirrored inline in
+    log_lifecycle.py, which stays stdlib-only and import-free by design.
+    """
+    if url and '://' not in url:
+        return f'http://{url}'
+    return url
+
+
 def _cdp_base_url():
     """Get CDP base URL from --cdp flag, PASSE_CDP env var, or default to localhost:9222."""
-    return _cdp_override or os.environ.get('PASSE_CDP', '').strip() or 'http://localhost:9222'
+    return _normalize_endpoint(
+        _cdp_override or os.environ.get('PASSE_CDP', '').strip() or 'http://localhost:9222')
 
 
 def _chrome_running() -> bool:
@@ -152,7 +165,7 @@ def discover_chrome(cdp_url: str | None = None) -> tuple[str, dict]:
         info: dict with 'cdp' (base URL), 'browser' (version string),
               'remote' (bool).
     """
-    base_url = cdp_url or _cdp_base_url()
+    base_url = _normalize_endpoint(cdp_url) if cdp_url else _cdp_base_url()
     is_remote = not _is_loopback(base_url)
 
     try:
