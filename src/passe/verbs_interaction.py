@@ -5,9 +5,55 @@ import json
 import sys
 
 from passe.client import CDPClient
+from passe.refcache import REF_PATTERN, load_refs
+
+
+async def _resolve_ref(client: CDPClient, ref: str) -> str:
+    """Resolve an eN ref (from ax-tree --flat-refs) to a Runtime objectId.
+
+    Raises RuntimeError with re-snap guidance when the ref is unknown or
+    the cached backendDOMNodeId no longer resolves (page navigated).
+    """
+    refs = load_refs(client._target_id or '')
+    if not refs or ref not in refs:
+        raise RuntimeError(
+            f'ref {ref!r} not found — run "ax-tree --flat-refs" first '
+            f'(refs are cleared on navigation)')
+    backend_id = refs[ref]
+    try:
+        # getDocument first: resolveNode needs the DOM agent to know the tree
+        await client.send('DOM.getDocument', {'depth': 0})
+        resolved = await client.send('DOM.resolveNode',
+                                     {'backendNodeId': backend_id})
+        return resolved['result']['object']['objectId']
+    except Exception:
+        raise RuntimeError(
+            f'ref {ref!r} is stale (page changed since the snapshot) — '
+            f're-run "ax-tree --flat-refs"')
+
+
+async def _call_on_ref(client: CDPClient, ref: str, fn: str, verb: str) -> dict:
+    """Run a functionDeclaration with `this` bound to the ref's element."""
+    object_id = await _resolve_ref(client, ref)
+    result = await client.send('Runtime.callFunctionOn', {
+        'objectId': object_id,
+        'functionDeclaration': fn,
+        'returnByValue': True,
+    })
+    if 'exceptionDetails' in result.get('result', {}):
+        desc = result['result']['exceptionDetails'].get(
+            'exception', {}).get('description', '')
+        raise RuntimeError(f'{verb} {ref} failed: {desc}')
+    return result
 
 
 async def do_click(client: CDPClient, selector: str):
+    if REF_PATTERN.match(selector):
+        await _call_on_ref(
+            client, selector,
+            'function() { this.scrollIntoView({block: "center"}); this.click(); }',
+            'click')
+        return
     js = f'''(() => {{
         const el = document.querySelector({json.dumps(selector)});
         if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});
@@ -75,6 +121,32 @@ async def do_fill(client: CDPClient, selector: str, value: str):
 
 async def do_type(client: CDPClient, selector: str, text: str):
     from passe.verbs_observation import do_eval
+
+    if REF_PATTERN.match(selector):
+        await _call_on_ref(
+            client, selector,
+            'function() { this.scrollIntoView({block: "center"}); this.focus(); }',
+            'type')
+        for char in text:
+            await client.send('Input.insertText', {'text': char})
+        check = await _call_on_ref(
+            client, selector, 'function() { return this.value; }', 'type')
+        actual = check.get('result', {}).get('result', {}).get('value')
+        if actual != text:
+            await _call_on_ref(client, selector, f'''function() {{
+                this.focus();
+                const proto = this.tagName === 'TEXTAREA'
+                    ? window.HTMLTextAreaElement.prototype
+                    : window.HTMLInputElement.prototype;
+                const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
+                setter.call(this, {json.dumps(text)});
+                this.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                this.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}''', 'type')
+            await asyncio.sleep(0.1)
+            print('[type] React controlled input detected — used '
+                  'nativeInputValueSetter', file=sys.stderr)
+        return
 
     # Focus the element first
     js = f'''(() => {{
@@ -165,6 +237,17 @@ async def do_press(client: CDPClient, key: str):
 
 
 async def do_hover(client: CDPClient, selector: str):
+    if REF_PATTERN.match(selector):
+        result = await _call_on_ref(client, selector, '''function() {
+            this.scrollIntoView({block: "center"});
+            const rect = this.getBoundingClientRect();
+            return JSON.stringify({x: rect.x + rect.width/2, y: rect.y + rect.height/2});
+        }''', 'hover')
+        coords = json.loads(result['result']['result']['value'])
+        await client.send('Input.dispatchMouseEvent', {
+            'type': 'mouseMoved', 'x': coords['x'], 'y': coords['y']
+        })
+        return
     js = f'''(() => {{
         const el = document.querySelector({json.dumps(selector)});
         if (!el) throw new Error('No element matches: ' + {json.dumps(selector)});

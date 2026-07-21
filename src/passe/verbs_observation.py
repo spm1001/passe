@@ -1006,13 +1006,47 @@ def _compact_tree(tree: list[dict]) -> list[dict]:
     return compacted
 
 
+# Roles that --flat-refs keeps: things an agent can act on.
+_INTERACTIVE_ROLES = {
+    'button', 'link', 'textbox', 'checkbox', 'menuitem', 'tab', 'option',
+    'combobox', 'radio', 'searchbox', 'switch', 'slider',
+}
+
+
+def _flat_refs(nodes: list[dict]) -> tuple[list[dict], dict]:
+    """Filter AX nodes to interactive roles, assign e0..eN in document
+    order. Returns (entries, {ref: backendDOMNodeId})."""
+    entries = []
+    mapping = {}
+    for node in nodes:
+        if node.get('ignored', False):
+            continue
+        role = node.get('role', {}).get('value', '')
+        if role not in _INTERACTIVE_ROLES:
+            continue
+        backend_id = node.get('backendDOMNodeId')
+        if backend_id is None:
+            continue
+        ref = f'e{len(entries)}'
+        entry = {'ref': ref, 'role': role}
+        name = node.get('name', {}).get('value', '')
+        if name:
+            entry['name'] = name[:120]
+        entries.append(entry)
+        mapping[ref] = backend_id
+    return entries, mapping
+
+
 async def do_ax_tree(client: CDPClient, depth: int = None,
-                     compact: bool = False) -> str:
+                     compact: bool = False, flat_refs: bool = False) -> str:
     """Return the full accessibility tree as structured JSON.
 
     depth: max tree depth to fetch (None = unlimited). Passed to CDP's
     getFullAXTree which truncates server-side — cheaper than post-filtering.
     compact: strip StaticText/InlineTextBox leaf nodes for a cleaner skeleton.
+    flat_refs: emit interactive elements only, as flat one-line entries
+    [{ref, role, name}], and cache {ref: backendDOMNodeId} per tab so
+    'click e7' works in a later call (passe-cosapu).
     """
     params = {}
     if depth is not None:
@@ -1023,6 +1057,18 @@ async def do_ax_tree(client: CDPClient, depth: int = None,
     truncated = len(nodes) > MAX_AX_NODES
     if truncated:
         nodes = nodes[:MAX_AX_NODES]
+
+    if flat_refs:
+        from passe.refcache import save_refs
+        entries, mapping = _flat_refs(nodes)
+        save_refs(client._target_id or '', mapping)
+        if truncated:
+            print(f'[ax-tree] truncated to {MAX_AX_NODES} nodes '
+                  f'(use --depth N to limit)', file=sys.stderr)
+        if not entries:
+            return '[]'
+        return '[\n' + ',\n'.join(json.dumps(e) for e in entries) + '\n]'
+
     tree = _build_ax_tree(nodes)
     if compact:
         tree = _compact_tree(tree)

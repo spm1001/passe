@@ -286,6 +286,7 @@ class CDPClient:
             'flatten': True
         })
         self.session_id = result['result']['sessionId']
+        self._target_id = pages[0]['targetId']
         self._owns_tab = False
         return self.session_id
 
@@ -318,6 +319,7 @@ class CDPClient:
             'flatten': True
         })
         self.session_id = result['result']['sessionId']
+        self._target_id = target['targetId']
         self._owns_tab = False
         return self.session_id
 

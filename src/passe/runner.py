@@ -191,7 +191,13 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 if nav['status_code'] is not None:
                     step_info['status_code'] = nav['status_code']
             elif verb in ('click', 'click-text'):
-                if verb == 'click-text' or not _is_css_selector(args[0]):
+                # eN refs (from ax-tree --flat-refs) route to do_click, never
+                # text click — 'e1' has no CSS chars and would smart-dispatch
+                # to a text search for the literal string 'e1'.
+                from passe.refcache import REF_PATTERN
+                if verb == 'click' and REF_PATTERN.match(args[0]):
+                    await do_click(client, args[0])
+                elif verb == 'click-text' or not _is_css_selector(args[0]):
                     await do_click_text(client, args[0])
                 else:
                     await do_click(client, args[0])
@@ -449,12 +455,16 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                 compact = '--compact' in tree_args
                 if compact:
                     tree_args.remove('--compact')
+                flat = '--flat-refs' in tree_args
+                if flat:
+                    tree_args.remove('--flat-refs')
                 if '--depth' in tree_args:
                     idx = tree_args.index('--depth')
                     if idx + 1 < len(tree_args):
                         depth = int(tree_args[idx + 1])
                         del tree_args[idx:idx + 2]
-                text = await do_ax_tree(client, depth=depth, compact=compact)
+                text = await do_ax_tree(client, depth=depth, compact=compact,
+                                        flat_refs=flat)
                 word_count = len(text.split())
                 if word_count <= CONTENT_INLINE_THRESHOLD:
                     step_info['content'] = text
