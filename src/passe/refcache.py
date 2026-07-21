@@ -18,6 +18,12 @@ REFS_DIR = None  # resolved lazily; tests patch this
 REF_PATTERN = re.compile(r'^e\d+$')
 
 
+def tab_id_of(client) -> str:
+    """Current tab id, or '' — tolerant of spec'd test doubles that lack
+    the _target_id instance attribute."""
+    return getattr(client, '_target_id', None) or ''
+
+
 def _refs_file(tab_id: str) -> Path:
     base = REFS_DIR or Path.home() / '.passe' / 'refs'
     return base / (str(tab_id).replace('/', '_') + '.json')

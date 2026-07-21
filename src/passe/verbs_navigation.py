@@ -32,8 +32,8 @@ async def do_navigate(client: CDPClient, url: str) -> dict:
             status_code = req['status']
             break
     # backendDOMNodeIds never survive a page load — drop this tab's refs
-    from passe.refcache import clear_refs
-    clear_refs(client._target_id or '')
+    from passe.refcache import clear_refs, tab_id_of
+    clear_refs(tab_id_of(client))
     return {'url': current_url, 'status_code': status_code}
 
 
@@ -47,8 +47,8 @@ async def do_back(client: CDPClient) -> str:
     if idx > 0:
         await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx - 1]['id']})
         await asyncio.sleep(0.1)
-        from passe.refcache import clear_refs
-        clear_refs(client._target_id or '')
+        from passe.refcache import clear_refs, tab_id_of
+        clear_refs(tab_id_of(client))
     return await do_eval(client, 'window.location.href')
 
 
@@ -62,8 +62,8 @@ async def do_forward(client: CDPClient) -> str:
     if idx < len(entries) - 1:
         await client.send('Page.navigateToHistoryEntry', {'entryId': entries[idx + 1]['id']})
         await asyncio.sleep(0.1)
-        from passe.refcache import clear_refs
-        clear_refs(client._target_id or '')
+        from passe.refcache import clear_refs, tab_id_of
+        clear_refs(tab_id_of(client))
     return await do_eval(client, 'window.location.href')
 
 

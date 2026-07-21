@@ -1059,9 +1059,9 @@ async def do_ax_tree(client: CDPClient, depth: int = None,
         nodes = nodes[:MAX_AX_NODES]
 
     if flat_refs:
-        from passe.refcache import save_refs
+        from passe.refcache import save_refs, tab_id_of
         entries, mapping = _flat_refs(nodes)
-        save_refs(client._target_id or '', mapping)
+        save_refs(tab_id_of(client), mapping)
         if truncated:
             print(f'[ax-tree] truncated to {MAX_AX_NODES} nodes '
                   f'(use --depth N to limit)', file=sys.stderr)

@@ -5,7 +5,7 @@ import json
 import sys
 
 from passe.client import CDPClient
-from passe.refcache import REF_PATTERN, load_refs
+from passe.refcache import REF_PATTERN, load_refs, tab_id_of
 
 
 async def _resolve_ref(client: CDPClient, ref: str) -> str:
@@ -14,7 +14,7 @@ async def _resolve_ref(client: CDPClient, ref: str) -> str:
     Raises RuntimeError with re-snap guidance when the ref is unknown or
     the cached backendDOMNodeId no longer resolves (page navigated).
     """
-    refs = load_refs(client._target_id or '')
+    refs = load_refs(tab_id_of(client))
     if not refs or ref not in refs:
         raise RuntimeError(
             f'ref {ref!r} not found — run "ax-tree --flat-refs" first '
