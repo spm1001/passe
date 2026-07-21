@@ -86,7 +86,7 @@ async def test_waiter_consumes_before_buffer():
     client = CDPClient(ws)
 
     # Register waiter before events arrive
-    fut = asyncio.get_event_loop().create_future()
+    fut = asyncio.get_running_loop().create_future()
     client.event_waiters['Page.loadEventFired'] = fut
 
     await client.start()
@@ -128,7 +128,7 @@ async def test_stale_waiter_does_not_drop_event():
         async def __anext__(self):
             if not self._messages:
                 # Keep the receiver alive (block until cancelled)
-                await asyncio.get_event_loop().create_future()
+                await asyncio.get_running_loop().create_future()
             await asyncio.sleep(0.15)  # Delay delivery past the timeout
             return self._messages.pop(0)
 
@@ -177,7 +177,7 @@ async def test_unsolicited_event_consumed_by_next_waiter():
     client = CDPClient(ws)
 
     # Register waiter for first event (simulating first goto)
-    fut = asyncio.get_event_loop().create_future()
+    fut = asyncio.get_running_loop().create_future()
     client.event_waiters['Page.loadEventFired'] = fut
 
     await client.start()

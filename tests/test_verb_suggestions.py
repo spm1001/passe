@@ -18,7 +18,7 @@ def _run(script_text):
     """Parse and run a script, returning the summary dict."""
     steps = parse_script(script_text)
     client = _mock_client()
-    return asyncio.get_event_loop().run_until_complete(run_script(client, steps))
+    return asyncio.run(run_script(client, steps))
 
 
 class TestVerbSuggestions:

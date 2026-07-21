@@ -90,7 +90,7 @@ class CDPClient:
         msg = {'id': self.msg_id, 'method': method, 'params': params or {}}
         if self.session_id:
             msg['sessionId'] = self.session_id
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self.pending[self.msg_id] = fut
         await self.ws.send(json.dumps(msg))
         return await asyncio.wait_for(fut, timeout=timeout)
@@ -99,7 +99,7 @@ class CDPClient:
         # Check buffer first — the event may have fired before we started waiting
         if method in self.event_buffer:
             return self.event_buffer.pop(method)
-        fut = asyncio.get_event_loop().create_future()
+        fut = asyncio.get_running_loop().create_future()
         self.event_waiters[method] = fut
         return await asyncio.wait_for(fut, timeout=timeout)
 

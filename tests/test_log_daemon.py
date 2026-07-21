@@ -402,11 +402,13 @@ class TestReconnection:
         d = LogDaemon(log_dir=tmp_path)
         d.sessions['s1'] = {'url': 'x'}
         d.store.start('r1', {'url': 'y'})
-        d._pending[1] = asyncio.Future()
+        loop = asyncio.new_event_loop()
+        d._pending[1] = loop.create_future()
         d._reset_session_state()
         assert len(d.sessions) == 0
         assert d.store.get('r1') is None
         assert len(d._pending) == 0
+        loop.close()
 
     @pytest.mark.asyncio
     async def test_connection_error_triggers_reconnect(self, tmp_path):

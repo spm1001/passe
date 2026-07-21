@@ -40,8 +40,7 @@ def _run_capturing_stderr(script_text):
     old = sys.stderr
     sys.stderr = buf
     try:
-        summary = asyncio.get_event_loop().run_until_complete(
-            run_script(client, steps))
+        summary = asyncio.run(run_script(client, steps))
     finally:
         sys.stderr = old
     return summary, buf.getvalue()
