@@ -33,9 +33,10 @@ Passe is for **fast, scriptable, single-connection browser automation from the C
 
 `passe fetch` tries an HTTP-first approach before connecting to Chrome. For ~87% of pages (articles, docs, static sites), this returns clean markdown in 300-1500ms without touching Chrome at all. The fast-path:
 
-1. **Framework shortcuts**: Apple Developer docs (JSON API), Next.js `__NEXT_DATA__` (pre-rendered JSON)
-2. **HTTP + trafilatura**: httpx GET → trafilatura extraction → composite quality gate
-3. **Quality gate**: word count, stop words ratio, link density, text-to-HTML ratio, table/code preservation, paywall/CAPTCHA detection. Below threshold → falls through to Chrome silently.
+1. **Canonical markdown probe**: pages advertising `<link rel="alternate" type="text/markdown">` (Mintlify-hosted docs — code.claude.com, mintlify.com — and the spreading llms.txt convention) are served from their `.md` sibling directly; the source file beats any HTML extraction. On escalation paths (SPA shell, empty extraction, quality-gate failure) a guessed `URL.md` probe also fires before Chrome. Healthy non-advertising fetches pay nothing extra. Summary shows `source: markdown_probe`.
+2. **Framework shortcuts**: Apple Developer docs (JSON API), Next.js `__NEXT_DATA__` (pre-rendered JSON)
+3. **HTTP + trafilatura**: httpx GET → trafilatura extraction → composite quality gate
+4. **Quality gate**: word count, stop words ratio, link density, text-to-HTML ratio, table/code preservation, paywall/CAPTCHA detection. Below threshold → falls through to Chrome silently.
 
 When the fast-path succeeds, the summary JSON includes `"fast_path": true`. When it fails, Chrome takes over transparently — the caller sees the same output format either way. The `extract` verb inside `passe run` scripts always uses Chrome (no fast-path) since the script may need interaction before extraction.
 

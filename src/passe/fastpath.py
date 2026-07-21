@@ -67,6 +67,15 @@ _NEXT_DATA_RE = re.compile(
     re.DOTALL,
 )
 
+# Canonical markdown source advertisement (Mintlify and the llms.txt
+# convention): <link rel="alternate" type="text/markdown" href="...">
+_MD_LINK_RE = re.compile(
+    r'<link\b[^>]*type=["\']text/markdown["\'][^>]*>', re.IGNORECASE)
+_HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
+
+_MARKDOWN_CONTENT_TYPES = frozenset(
+    {'text/markdown', 'text/x-markdown', 'text/plain'})
+
 
 @dataclass
 class FastPathResult:
@@ -204,6 +213,58 @@ def _extract_text_from_props(obj, depth=0) -> list[str]:
 def _count_html_elements(html: str, tag: str) -> int:
     """Count occurrences of an HTML tag in raw HTML."""
     return len(re.findall(rf'<{tag}\b', html, re.IGNORECASE))
+
+
+def _markdown_source_url(html: str, final_url: str, guess: bool) -> str | None:
+    """Find a canonical markdown URL for this page, or None.
+
+    Advertised (authoritative): a <link rel="alternate" type="text/markdown">
+    tag in the page HTML. Guessed: URL + '.md' — only when guess=True, so
+    healthy fetches never pay for speculation.
+    """
+    from urllib.parse import urljoin, urlsplit
+    link = _MD_LINK_RE.search(html)
+    if link:
+        href = _HREF_RE.search(link.group(0))
+        if href:
+            return urljoin(final_url, href.group(1))
+    if not guess:
+        return None
+    parts = urlsplit(final_url)
+    path = parts.path
+    if not path or path == '/' or path.endswith('.md'):
+        return None
+    return f'{parts.scheme}://{parts.netloc}{path.rstrip("/")}.md'
+
+
+def _fetch_markdown_candidate(md_url: str) -> str | None:
+    """GET a candidate markdown URL; return text only if it's really markdown.
+
+    Accept criteria: HTTP 200, markdown/plain content-type, body not an HTML
+    shell (SPAs serve their shell on every path), non-trivial word count.
+    """
+    import httpx
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=15.0,
+            headers={'User-Agent': 'Mozilla/5.0 (compatible; passe/1.0)'},
+        ) as client:
+            resp = client.get(md_url)
+    except (httpx.HTTPError, httpx.TimeoutException):
+        return None
+    if resp.status_code != 200:
+        return None
+    ctype = resp.headers.get('content-type', '').split(';')[0].strip().lower()
+    if ctype not in _MARKDOWN_CONTENT_TYPES:
+        return None
+    text = resp.text
+    head = text.lstrip()[:100].lower()
+    if head.startswith('<!doctype') or head.startswith('<html'):
+        return None
+    if _count_words(text) < 20:
+        return None
+    return text
 
 
 def quality_gate(markdown: str, html: str, url: str) -> tuple[float, dict]:
@@ -348,9 +409,39 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
             fetch_ms=fetch_ms, content_type=content_type,
         )
 
+    # --- Canonical markdown source probe ---
+    # The source file beats any HTML extraction. Advertised links are checked
+    # on every HTML fetch (string scan, no extra request unless found);
+    # guessed URL.md probes fire only on escalation paths below.
+    def _probe_markdown(reason: str, guess: bool) -> FastPathResult | None:
+        if force_source is not None:
+            return None
+        md_url = _markdown_source_url(html, final_url, guess=guess)
+        if not md_url:
+            return None
+        md_text = _fetch_markdown_candidate(md_url)
+        if not md_text:
+            return None
+        wc = _count_words(md_text)
+        elapsed = round((time.monotonic() - t0) * 1000, 1)
+        print(f'[fetch] markdown source ({reason}): {md_url} '
+              f'({wc} words, {elapsed}ms)', file=sys.stderr)
+        return FastPathResult(
+            markdown=md_text, url=final_url, source='markdown_probe',
+            quality_score=1.0, word_count=wc, fetch_ms=elapsed,
+            content_type='text/markdown',
+        )
+
+    md_result = _probe_markdown('advertised', guess=False)
+    if md_result:
+        return md_result
+
     # --- SPA shell detection — skip trafilatura, escalate immediately ---
     spa_shell = _detect_spa_shell(html)
     if spa_shell:
+        md_result = _probe_markdown('spa_shell', guess=True)
+        if md_result:
+            return md_result
         print(f'[fetch] {spa_shell} detected — escalating to Chrome', file=sys.stderr)
         return None
 
@@ -412,6 +503,9 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
         return None
 
     if not extracted:
+        md_result = _probe_markdown('empty_extraction', guess=True)
+        if md_result:
+            return md_result
         print('[fetch] trafilatura returned empty — escalating to Chrome', file=sys.stderr)
         return None
 
@@ -420,6 +514,9 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     elapsed = round((time.monotonic() - t0) * 1000, 1)
 
     if score < QUALITY_THRESHOLD:
+        md_result = _probe_markdown('quality_gate', guess=True)
+        if md_result:
+            return md_result
         reason = signals.get('reject', f'quality={score:.2f}')
         print(f'[fetch] quality gate failed ({reason}) — escalating to Chrome',
               file=sys.stderr)
