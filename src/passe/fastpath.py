@@ -76,6 +76,58 @@ _HREF_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
 _MARKDOWN_CONTENT_TYPES = frozenset(
     {'text/markdown', 'text/x-markdown', 'text/plain'})
 
+# Host-level memory of guessed-probe outcomes: serving .md siblings is a
+# platform property, so one answer per host. Keeps the speculative GET off
+# .md-less docs sites (MDN, docs.python.org) after first contact.
+PROBE_CACHE_PATH = None  # resolved lazily; tests patch this
+_PROBE_CACHE_TTL = 7 * 24 * 3600
+
+
+def _probe_cache_file():
+    from pathlib import Path
+    return PROBE_CACHE_PATH or Path.home() / '.passe' / 'md-hosts.json'
+
+
+def _probe_cache_get(host: str) -> bool | None:
+    """True/False if we have a fresh answer for this host, else None."""
+    import json as json_mod
+    try:
+        with open(_probe_cache_file()) as f:
+            cache = json_mod.load(f)
+        entry = cache.get(host)
+        if not entry or time.time() - entry.get('ts', 0) > _PROBE_CACHE_TTL:
+            return None
+        return bool(entry.get('md'))
+    except Exception:
+        return None
+
+
+def _probe_cache_set(host: str, has_md: bool):
+    """Best-effort write; last writer wins, failures are silent."""
+    import json as json_mod
+    path = _probe_cache_file()
+    try:
+        try:
+            with open(path) as f:
+                cache = json_mod.load(f)
+        except Exception:
+            cache = {}
+        cache[host] = {'md': has_md, 'ts': time.time()}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, 'w') as f:
+            json_mod.dump(cache, f)
+    except Exception:
+        pass
+
+
+def _docs_shaped(url: str) -> bool:
+    """URLs where unadvertised .md siblings are plausible enough to spend
+    one GET on (platform.claude.com-style docs platforms)."""
+    from urllib.parse import urlsplit
+    parts = urlsplit(url)
+    return (parts.netloc.startswith('docs.')
+            or '/docs/' in parts.path)
+
 
 @dataclass
 class FastPathResult:
@@ -416,12 +468,22 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     def _probe_markdown(reason: str, guess: bool) -> FastPathResult | None:
         if force_source is not None:
             return None
+        from urllib.parse import urlsplit
+        host = urlsplit(final_url).netloc
+        if guess and _probe_cache_get(host) is False:
+            return None  # host known not to serve .md siblings
         md_url = _markdown_source_url(html, final_url, guess=guess)
         if not md_url:
             return None
         md_text = _fetch_markdown_candidate(md_url)
         if not md_text:
+            if guess:
+                _probe_cache_set(host, False)
+                print(f'[fetch] no markdown source at {md_url}',
+                      file=sys.stderr)
             return None
+        if guess:
+            _probe_cache_set(host, True)
         wc = _count_words(md_text)
         elapsed = round((time.monotonic() - t0) * 1000, 1)
         print(f'[fetch] markdown source ({reason}): {md_url} '
@@ -435,6 +497,17 @@ def try_http_fetch(url: str, force_source: str | None = None) -> FastPathResult 
     md_result = _probe_markdown('advertised', guess=False)
     if md_result:
         return md_result
+
+    # Unadvertised .md siblings (platform.claude.com et al): guess on
+    # docs-shaped URLs, and on any host the cache knows serves them.
+    # The known-negative guard inside _probe_markdown keeps the tax off
+    # .md-less docs sites after first contact.
+    from urllib.parse import urlsplit as _urlsplit
+    if _docs_shaped(final_url) or _probe_cache_get(
+            _urlsplit(final_url).netloc) is True:
+        md_result = _probe_markdown('docs-shaped guess', guess=True)
+        if md_result:
+            return md_result
 
     # --- SPA shell detection — skip trafilatura, escalate immediately ---
     spa_shell = _detect_spa_shell(html)

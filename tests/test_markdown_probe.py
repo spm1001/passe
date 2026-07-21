@@ -9,11 +9,21 @@ exactly one request.
 
 from unittest.mock import patch
 
+import pytest
+
+import passe.fastpath as fastpath
 from passe.fastpath import (
     _fetch_markdown_candidate,
     _markdown_source_url,
     try_http_fetch,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolated_probe_cache(tmp_path, monkeypatch):
+    """Point the host cache at a per-test file — never at ~/.passe."""
+    monkeypatch.setattr(fastpath, 'PROBE_CACHE_PATH',
+                        tmp_path / 'md-hosts.json')
 
 
 PAGE_URL = 'https://site.test/docs/page'
@@ -164,15 +174,64 @@ class TestTryHttpFetchProbe:
         assert result.source == 'markdown_probe'
         assert result.markdown == MD_BODY
 
-    def test_healthy_page_makes_single_request(self):
+    def test_healthy_non_docs_page_makes_single_request(self):
+        """Non-docs-shaped healthy pages never pay for speculation."""
+        url = 'https://site.test/article/page'
         calls = []
-        routes = {PAGE_URL: _FakeResponse(PAGE_URL, text=RICH_HTML)}
+        routes = {url: _FakeResponse(url, text=RICH_HTML)}
         with _patched_httpx(routes, calls):
-            result = try_http_fetch(PAGE_URL)
+            result = try_http_fetch(url)
         assert result is not None
         assert result.source == 'trafilatura'
         assert result.escalate_reason is None
-        assert calls == [PAGE_URL]
+        assert calls == [url]
+
+    def test_docs_shaped_url_probed_even_when_extraction_passes(self):
+        """The platform.claude.com shape: unadvertised .md sibling, healthy
+        extraction — the docs-shaped guess still finds the canonical source."""
+        calls = []
+        routes = {
+            PAGE_URL: _FakeResponse(PAGE_URL, text=RICH_HTML),
+            MD_URL: _FakeResponse(MD_URL, text=MD_BODY, ctype='text/markdown'),
+        }
+        with _patched_httpx(routes, calls):
+            result = try_http_fetch(PAGE_URL)
+        assert result is not None
+        assert result.source == 'markdown_probe'
+        assert result.markdown == MD_BODY
+
+    def test_negative_host_cached_no_repeat_probe(self):
+        """First docs-shaped fetch pays one wasted GET; the second doesn't."""
+        calls = []
+        routes = {PAGE_URL: _FakeResponse(PAGE_URL, text=RICH_HTML)}
+        with _patched_httpx(routes, calls):
+            first = try_http_fetch(PAGE_URL)
+            second = try_http_fetch(PAGE_URL)
+        assert first is not None and second is not None
+        assert first.source == 'trafilatura'
+        assert second.source == 'trafilatura'
+        # One probe GET total (404'd, cached negative), not two
+        assert calls.count(MD_URL) == 1
+
+    def test_positive_host_cached_probes_next_fetch(self):
+        """A host that served .md once gets probed on its next fetch even
+        on a non-docs-shaped path."""
+        other_url = 'https://site.test/guide/page'
+        other_md = 'https://site.test/guide/page.md'
+        calls = []
+        routes = {
+            PAGE_URL: _FakeResponse(PAGE_URL, text=THIN_HTML),
+            MD_URL: _FakeResponse(MD_URL, text=MD_BODY, ctype='text/markdown'),
+            other_url: _FakeResponse(other_url, text=RICH_HTML),
+            other_md: _FakeResponse(other_md, text=MD_BODY,
+                                    ctype='text/markdown'),
+        }
+        with _patched_httpx(routes, calls):
+            first = try_http_fetch(PAGE_URL)
+            second = try_http_fetch(other_url)
+        assert first is not None and first.source == 'markdown_probe'
+        assert second is not None and second.source == 'markdown_probe'
+        assert other_md in calls
 
     def test_bad_md_candidate_falls_through_to_escalation(self):
         calls = []
