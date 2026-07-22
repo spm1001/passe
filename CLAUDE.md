@@ -128,7 +128,7 @@ passe run tests/checkout-flow.passe
 - `scroll <x> <y>` — window.scrollTo
 
 **Interaction:**
-- `click <selector-or-text>` — smart dispatch: CSS selector (contains `. # [ : > ~ +`) → `querySelector`; plain text → find by text content and click. `click "Reject"` works for cookie banners, `click ".btn"` for selectors.
+- `click <selector-or-text-or-ref>` — smart dispatch: CSS selector (contains `. # [ : > ~ +`) → `querySelector`; an `e<N>` ref from `ax-tree --flat-refs` → cached-element click; plain text → find by text content and click. `click "Reject"` works for cookie banners, `click ".btn"` for selectors, `click e1` after a flat-refs snapshot.
 - `type <selector> <text>` — character-by-character via `Input.insertText`. Works with React, Vue, and plain HTML. Auto-detects controlled inputs and falls back to `nativeInputValueSetter` if needed.
 - `fill <selector> <value>` — set value directly. Faster but may not trigger framework reactivity. Use `type` if unsure.
 - `select <selector> <value>` — dropdown

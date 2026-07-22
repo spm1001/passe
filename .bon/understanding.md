@@ -8,7 +8,7 @@ Passe is a CDP browser automation CLI that connects Claude to Chrome via raw Web
 
 The DSL was overhauled in March 2026 following a usability audit of 3,880 real invocations across 458 sessions. The governing principle: if every Claude writes it a certain way unprompted, that's the correct grammar. A naive-Claude survey (n=43) confirmed model instincts align with `goto` (81%), `wait` (100%), `click "text"` (100%), and `extract` over `read` (100%). Dead verbs with zero real usage (`click-if`, `wait-navigation`, `click-text`) were removed. `wait` collapsed three verbs into one (sleep/selector/network-idle by argument shape). All user-facing timeouts are seconds, never milliseconds.
 
-The gap between "taught" and "used" is the kill signal for grammar decisions. `~/Taildrive/passe-usability.txt` is the ground truth. `snapshot` (25 uses) survived because scout-then-act works when taught — it's the rare case where explicit instruction changes behavior.
+The gap between "taught" and "used" is the kill signal for grammar decisions. The raw audit file lived at `~/Taildrive/passe-usability.txt` — Taildrive was retired 2026-07-07 and the file's new home (if any) is unrecorded, so the audit's conclusions as written here are what survives. `snapshot` (25 uses) survived because scout-then-act works when taught — it's the rare case where explicit instruction changes behavior.
 
 ## Extraction Architecture
 
@@ -92,6 +92,6 @@ Subcommands (`fetch`, `look`, `check`, `screenshot`, `eval`, `capture`, `tabs`) 
 
 Compared to kuri's stateful CLI (`use → go → snap → click eN`), passe's atomic-per-call model is faster but harder to think in. The mitigation isn't to abandon the model — it's to make the obvious path the right path more often.
 
-## Portfolio status (2026-06-09 audit)
+## Portfolio status (2026-07-22)
 
-Repo dormant (no src commits since 2026-04-22) but the *itch is live*: Sameer frames passe as part of "making it easy for Claude to read stuff on my behalf, including stuff gated by Turnstile or similar hostile tech". passe-partout's v2 appliance (logged-in profile, home IP) is the same thread. Backlog grooming deliberately deferred to the coming batterie reshape (bds-hifusu, Cornichon-driven). Freshest resumable thread: lajesa/ropuze/pedute (fetch code-block work, 2026-05-20).
+Active again. The 2026-07-21 overnight burst shipped six items in one session — lesohu (scheme-less --cdp), nuguza (markdown probe), kojimi (llms.txt ladder), nopiku (fast-path reasons), bovunu (Python 3.14 fixes + CI matrix 3.11/3.14 + all 7 security alerts cleared), cosapu (flat-refs + eN targeting) — each committed, live-verified, and closed individually. The framing stands: passe is part of "making it easy for Claude to read stuff on my behalf, including stuff gated by Turnstile or similar hostile tech"; passe-partout (two backends since 2026-07-21: kube fingerprint specialist + tube everyday browser) is the same thread. Freshest resumable threads: ropuze (empty-pre warning, thinking done) and ketome (--reuse-tab targeting hazard).
