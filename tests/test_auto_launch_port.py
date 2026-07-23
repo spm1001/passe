@@ -79,3 +79,51 @@ async def test_env_var_port_launches_on_that_port():
         conn.set_cdp_override(original)
     assert call.args[0] == 9231
     assert call.kwargs['headless'] is False
+
+
+def test_start_chrome_passes_no_first_run():
+    """Fresh profiles must not open on Chrome's welcome page (passe-cavudo)."""
+    with patch('passe.connection._find_chrome',
+               return_value='/usr/bin/fake-chrome'), \
+         patch('passe.connection._chrome_running', return_value=True), \
+         patch('subprocess.Popen') as mock_popen:
+        conn._start_chrome(9224, headless=False)
+    cmd = mock_popen.call_args[0][0]
+    assert '--no-first-run' in cmd
+    assert '--remote-debugging-port=9224' in cmd
+
+
+@pytest.mark.asyncio
+async def test_conn_info_reports_launch_kind():
+    """conn_info['launched'] tells callers whether THIS run launched Chrome."""
+    from unittest.mock import AsyncMock
+
+    fake_ws = AsyncMock()
+    disc = ('ws://localhost:9224/devtools/browser/x',
+            {'cdp': 'http://localhost:9224', 'browser': 'T', 'remote': False})
+    original = conn._cdp_override
+    try:
+        conn.set_cdp_override('localhost:9224')
+        with patch('passe.connection._chrome_running', return_value=False), \
+             patch('passe.connection._start_chrome', return_value=None), \
+             patch('passe.connection.discover_chrome', return_value=disc), \
+             patch('passe.connection.websockets.connect',
+                   AsyncMock(return_value=fake_ws)), \
+             patch('passe.connection.CDPClient') as mock_client:
+            mock_client.return_value.start = AsyncMock()
+            mock_client.return_value.stop = AsyncMock()
+            async with conn.connect() as (_client, info):
+                assert info['launched'] == 'gui'
+
+        # Already-running Chrome → launched is None
+        with patch('passe.connection._chrome_running', return_value=True), \
+             patch('passe.connection.discover_chrome', return_value=disc), \
+             patch('passe.connection.websockets.connect',
+                   AsyncMock(return_value=fake_ws)), \
+             patch('passe.connection.CDPClient') as mock_client:
+            mock_client.return_value.start = AsyncMock()
+            mock_client.return_value.stop = AsyncMock()
+            async with conn.connect() as (_client, info):
+                assert info['launched'] is None
+    finally:
+        conn.set_cdp_override(original)

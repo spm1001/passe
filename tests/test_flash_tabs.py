@@ -2,6 +2,11 @@
 
 Flash tabs inject a JS timer that calls window.close() after a timeout,
 cancelled by user interaction (click/keydown/scroll/mousemove).
+
+Flash is EXPLICIT-ONLY (--flash). The old 30s keep-on-fail default was
+removed 2026-07-23 (passe-cavudo): window.close() is blocked for tabs with
+navigation history and no script opener, so the timer never actually closed
+navigated tabs — and a tab silently vanishing costs more than a stray tab.
 """
 
 import json
@@ -77,12 +82,12 @@ async def test_flash_custom_timeout():
     assert '60000' in eval_calls[0][0][1]['expression']
 
 
-# ── Keep-on-fail tabs get flash automatically ──────────────────────
+# ── Keep-on-fail tabs are kept WITHOUT a timer ──────────────────────
 
 
 @pytest.mark.asyncio
-async def test_keep_on_fail_gets_flash():
-    """Failed script tabs get 30s flash timer by default."""
+async def test_keep_on_fail_no_default_flash():
+    """Failed script tabs are kept open with NO self-destruct timer."""
     client = _make_client()
     failed_summary = {'ok': False, 'steps': 2, 'total_ms': 100,
                       'verb': 'click', 'error': 'not found',
@@ -98,8 +103,7 @@ async def test_keep_on_fail_gets_flash():
     client.close_tab.assert_not_called()
     eval_calls = [c for c in client.send.call_args_list
                   if c[0][0] == 'Runtime.evaluate']
-    assert len(eval_calls) == 1
-    assert '30000' in eval_calls[0][0][1]['expression']
+    assert len(eval_calls) == 0
 
 
 @pytest.mark.asyncio
@@ -202,12 +206,12 @@ async def test_reuse_tab_failure_no_flash():
     assert len(eval_calls) == 0
 
 
-# ── Exception path with flash ─────────────────────────────────────
+# ── Exception path keeps tab without a timer ──────────────────────
 
 
 @pytest.mark.asyncio
-async def test_exception_gets_flash():
-    """When run_script throws, keep-on-fail tab gets flash timer."""
+async def test_exception_keeps_tab_no_flash():
+    """When run_script throws, keep-on-fail tab is kept with no timer."""
     client = _make_client()
 
     with patch('passe.commands.connect', _mock_connect(client)), \
@@ -219,7 +223,7 @@ async def test_exception_gets_flash():
     client.close_tab.assert_not_called()
     eval_calls = [c for c in client.send.call_args_list
                   if c[0][0] == 'Runtime.evaluate']
-    assert len(eval_calls) == 1
+    assert len(eval_calls) == 0
 
 
 # ── CLI flag parsing ──────────────────────────────────────────────

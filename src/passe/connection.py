@@ -107,6 +107,9 @@ def _start_chrome(port=9222, headless=False):
         f'--remote-debugging-port={port}',
         '--user-data-dir=' + str(Path.home() / '.chrome-passe'),
         '--no-default-browser-check',
+        # Without this, a fresh profile opens on Chrome's first-run/welcome
+        # page — the human stares at it while the script runs elsewhere
+        '--no-first-run',
     ]
     if headless:
         cmd.append('--headless=new')
@@ -200,12 +203,14 @@ async def connect():
     """Connect to Chrome, yield (CDPClient, info), clean up on exit.
 
     info dict contains: cdp (base URL), browser (version string), remote (bool),
-    and optionally _process (Popen) if we auto-launched headless Chrome.
+    launched ('headless' | 'gui' | None), and _process (Popen) if we
+    auto-launched headless Chrome (killed at teardown).
     """
     base_url = _cdp_base_url()
     is_remote = not _is_loopback(base_url)
     cdp_explicit = _cdp_override is not None or bool(os.environ.get('PASSE_CDP', '').strip())
     chrome_proc = None
+    launched = None
     if not _chrome_running():
         if is_remote:
             raise ChromeConnectionError(
@@ -223,6 +228,7 @@ async def connect():
         from urllib.parse import urlparse
         port = urlparse(base_url).port or 9222
         headless = not cdp_explicit
+        launched = 'headless' if headless else 'gui'
         chrome_proc = _start_chrome(port, headless=headless)
 
     ws_url, disc_info = discover_chrome()
@@ -249,6 +255,11 @@ async def connect():
     await client.start()
     conn_info = {
         'cdp': base_url, 'browser': browser_str, 'remote': is_remote,
+        # 'headless' | 'gui' | None — whether THIS invocation launched Chrome.
+        # Callers use it to decide tab visibility (a fresh GUI window has no
+        # human context to disturb) and hint honesty (auto-launched headless
+        # Chrome dies at teardown, so nothing "kept" survives the run).
+        'launched': launched,
         '_process': chrome_proc,
     }
     try:

@@ -173,6 +173,9 @@ async def cmd_run(source: str, inline: str = None,
                 goto_origin = f'{parsed.scheme}://{parsed.netloc}'
                 break
 
+        # Auto-launched headless Chrome dies at teardown — no tab survives
+        ephemeral_browser = conn_info.get('_process') is not None
+
         if frame:
             await client.attach_to_frame(frame)
         elif reuse_tab:
@@ -185,7 +188,13 @@ async def cmd_run(source: str, inline: str = None,
                 if closed:
                     print(f'[passe] closed {closed} existing tab(s) at {goto_origin}',
                           file=sys.stderr)
-            await client.create_tab(foreground=foreground)
+            # A GUI window passe just launched has no human context to
+            # disturb — work in front where the human can see (passe-cavudo)
+            fresh_gui = conn_info.get('launched') == 'gui'
+            if fresh_gui and not foreground:
+                print('[passe] fresh Chrome window — running in the foreground tab',
+                      file=sys.stderr)
+            await client.create_tab(foreground=foreground or fresh_gui)
         await client.send('Page.enable')
         # Apply device preset before script if --device flag used
         if device:
@@ -197,9 +206,16 @@ async def cmd_run(source: str, inline: str = None,
             summary['browser'] = conn_info['browser']
             script_ok = summary.get('ok', True)
             if not script_ok and keep_on_fail and not keep_tab:
-                summary['tab_kept'] = True
-                print('[passe] script failed — tab kept open. Resume with: '
-                      'passe run --reuse-tab -c "..."', file=sys.stderr)
+                if ephemeral_browser:
+                    # Don't promise a resume in a browser we're about to kill
+                    print('[passe] script failed — auto-launched headless '
+                          'Chrome exits with the run, so no tab is kept. '
+                          'To debug interactively, point --cdp at a running '
+                          'Chrome and re-run.', file=sys.stderr)
+                else:
+                    summary['tab_kept'] = True
+                    print('[passe] script failed — tab kept open. Resume with: '
+                          'passe run --reuse-tab -c "..."', file=sys.stderr)
             _emit_summary(summary)
             print(json.dumps(summary))
             sys.exit(0 if script_ok else 1)
@@ -209,16 +225,22 @@ async def cmd_run(source: str, inline: str = None,
             raise
         finally:
             should_keep = keep_tab or (not script_ok and keep_on_fail)
-            if should_keep:
-                # Determine flash timeout: explicit --flash, or default 30s
-                # for keep-on-fail tabs (not for explicit --keep-tab)
-                flash_s = flash
-                if flash_s is None and not script_ok and keep_on_fail:
-                    flash_s = 30
-                if flash_s and flash_s > 0 and not reuse_tab:
+            if should_keep and ephemeral_browser:
+                # Nothing to keep — teardown takes the browser and its tabs
+                if keep_tab:
+                    print('[passe] note: --keep-tab has no effect — '
+                          'auto-launched headless Chrome exits with the run',
+                          file=sys.stderr)
+            elif should_keep:
+                # Flash timer is explicit-only. The old 30s keep-on-fail
+                # default never actually worked: window.close() is blocked
+                # for tabs with navigation history and no script opener
+                # (verified live 2026-07-23), and a tab silently vanishing
+                # costs more than a stray tab.
+                if flash and flash > 0 and not reuse_tab:
                     try:
                         await client.send('Runtime.evaluate', {
-                            'expression': _FLASH_JS % (flash_s * 1000, flash_s),
+                            'expression': _FLASH_JS % (flash * 1000, flash),
                         })
                     except Exception:
                         pass  # best-effort — page may have crashed
