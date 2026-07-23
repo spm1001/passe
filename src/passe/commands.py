@@ -299,8 +299,9 @@ async def cmd_run(source: str, inline: str = None,
                     # Don't promise a resume in a browser we're about to kill
                     print('[passe] script failed — auto-launched headless '
                           'Chrome exits with the run, so no tab is kept. '
-                          'To debug interactively, point --cdp at a running '
-                          'Chrome and re-run.', file=sys.stderr)
+                          'To debug interactively: passe login <url> '
+                          '(visible Chrome that outlives the run), then '
+                          're-run.', file=sys.stderr)
                 else:
                     summary['tab_kept'] = True
                     print('[passe] script failed — tab kept open. Resume with: '
@@ -345,6 +346,52 @@ async def cmd_run(source: str, inline: str = None,
                         pass  # best-effort — page may have crashed
             else:
                 await client.close_tab()
+
+
+async def cmd_login(url: str = None):
+    """The human-login moment: visible Chrome + foreground tab, kept open.
+
+    Auto-start is headless unless the endpoint is explicit, so on a bare
+    machine there was no window to log in to — the workaround was the
+    --cdp incantation (passe-gilizu, the PCA spike). This verb IS the
+    incantation with a name: start-or-attach visible Chrome at the
+    resolved endpoint, open the url in front, tell the human what to do.
+    The tab is recorded, so a follow-up --reuse-tab lands on it.
+    """
+    from passe import tabmemory
+    from passe.verbs import do_navigate
+
+    if url and '://' not in url:
+        url = 'https://' + url
+
+    async with connect(force_visible=True) as (client, conn_info):
+        await client.create_tab(foreground=True)
+        await client.send('Page.enable')
+        nav = None
+        if url:
+            nav = await do_navigate(client, url)
+
+        target_id = getattr(client, '_target_id', None)
+        if isinstance(target_id, str) and target_id:
+            tabmemory.save_last_tab(conn_info['cdp'], target_id,
+                                    (nav or {}).get('url', url or ''))
+
+        where = (nav or {}).get('url', url) if url else 'a fresh tab'
+        print(f'[passe] Chrome window is open on {where}.', file=sys.stderr)
+        print('[passe] Log in there, then re-run your command — '
+              'passe run --reuse-tab attaches to this tab.', file=sys.stderr)
+
+        summary = {
+            'ok': True, 'steps': 1 if url else 0,
+            'cdp': conn_info['cdp'], 'browser': conn_info['browser'],
+            'tab_kept': True,
+        }
+        if nav:
+            summary['final_url'] = nav.get('url', url)
+            summary['status_code'] = nav.get('status_code')
+        print(json.dumps(summary))
+        # No close_tab, no flash — the whole point is that the tab and
+        # browser outlive this command for the human to use.
 
 
 async def cmd_fetch(url: str, path: str = None,

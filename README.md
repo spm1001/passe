@@ -165,7 +165,15 @@ This is the same insight that made tools like Claude in Chrome and BrowserMCP va
 
 **The security model**: the debug port binds to localhost only. Since Chrome 136 (March 2025), `--remote-debugging-port` requires a separate `--user-data-dir` — Chrome won't expose your main profile's data directory over the debug protocol. This was a response to malware campaigns that relaunched Chrome with debug flags to dump cookies. The separate data directory gets its own encryption key, protecting main profile credentials.
 
-If Chrome isn't running when you invoke passe, it auto-starts one with `--user-data-dir=~/.chrome-passe` — a bare profile with no logins. Fine for public pages, but it won't have your sessions.
+If Chrome isn't running when you invoke passe, it auto-starts one with `--user-data-dir=~/.chrome-passe` — a bare profile with no logins. Fine for public pages, but it won't have your sessions. Auto-start is headless (invisible) unless you named the endpoint explicitly — right for scripts, useless for signing in.
+
+When a site needs *you* to log in first (auth-walled dashboards with no API tokens), use the verb for that moment:
+
+```bash
+passe login adalyser.example.com
+```
+
+It starts (or attaches to) a **visible** Chrome at the resolved endpoint, opens the page in a foreground tab, and leaves both alive. Log in in the window, then re-run your script — `passe run --reuse-tab` attaches to the login tab automatically (it's recorded in `~/.passe/last-tab.json`).
 
 ## When to use passe (and when not to)
 

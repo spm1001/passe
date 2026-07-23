@@ -199,12 +199,15 @@ def discover_chrome(cdp_url: str | None = None) -> tuple[str, dict]:
 
 
 @contextlib.asynccontextmanager
-async def connect():
+async def connect(force_visible: bool = False):
     """Connect to Chrome, yield (CDPClient, info), clean up on exit.
 
     info dict contains: cdp (base URL), browser (version string), remote (bool),
     launched ('headless' | 'gui' | None), and _process (Popen) if we
     auto-launched headless Chrome (killed at teardown).
+
+    force_visible=True launches GUI Chrome even at the implicit default
+    endpoint — the `passe login` path, where a human needs a window.
     """
     base_url = _cdp_base_url()
     is_remote = not _is_loopback(base_url)
@@ -227,7 +230,7 @@ async def connect():
         # 15s timeout (passe-besohe).
         from urllib.parse import urlparse
         port = urlparse(base_url).port or 9222
-        headless = not cdp_explicit
+        headless = not cdp_explicit and not force_visible
         launched = 'headless' if headless else 'gui'
         chrome_proc = _start_chrome(port, headless=headless)
 
@@ -244,8 +247,9 @@ async def connect():
     elif chrome_proc is not None:
         print(f'[passe] Chrome: {browser_str} (bare profile — no auth cookies)',
               file=sys.stderr)
-        print('[passe] hint: for authenticated browsing, start Chrome with '
-              'your profile first', file=sys.stderr)
+        print('[passe] hint: for authenticated browsing, use: passe login '
+              '<url> (visible Chrome for a human sign-in), or start Chrome '
+              'with your profile first', file=sys.stderr)
     else:
         print(f'[passe] Chrome: {browser_str}', file=sys.stderr)
 

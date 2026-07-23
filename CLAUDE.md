@@ -46,7 +46,9 @@ When the fast-path serves, the summary JSON includes `"fast_path": true`. When C
 
 Passe connects to Chrome on port 9222. Sameer's daily driver Chrome runs with `--remote-debugging-port=9222` — so passe gets his full auth state, cookies, SSO sessions.
 
-If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-passe`. That's a **bare profile** — no auth, no cookies, no extensions. This is fine for testing public pages but won't have any login sessions.
+If Chrome isn't running, passe auto-starts one with `--user-data-dir=~/.chrome-passe`. That's a **bare profile** — no auth, no cookies, no extensions. This is fine for testing public pages but won't have any login sessions. Auto-start is **headless unless the endpoint was named explicitly** (`--cdp`/`PASSE_CDP`) — and when passe does launch a visible Chrome itself, it runs the script in a **foreground** tab (a fresh window has no human context to disturb).
+
+**The human-login moment**: when a site needs Sameer to sign in (auth wall, no API), don't reach for `--cdp` incantations — `passe login <url>` starts-or-attaches visible Chrome at the resolved endpoint, opens the URL in a foreground tab, keeps browser and tab alive, and records the tab so `passe run --reuse-tab` resumes exactly there after he's logged in.
 
 **Never assume you have auth unless you've confirmed Chrome is Sameer's daily driver instance.**
 
@@ -263,6 +265,9 @@ passe capture --filter https://example.com /tmp/reqs.jsonl     # Skip analytics/
 
 passe fetch https://example.com              # Goto + auto-wait + read (short content inlined)
 passe fetch https://example.com /tmp/out.md  # Explicit path
+
+passe login site.example.com                 # Visible Chrome + foreground tab for a human sign-in
+                                             # (tab kept + remembered; resume with run --reuse-tab)
 
 passe screenshot /tmp/current-page.png       # Screenshot current page (no navigation)
 passe eval "document.title"                  # Quick JS eval on current page

@@ -17,8 +17,8 @@ import sys
 
 from passe.connection import set_cdp_override, ChromeConnectionError
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
-                            cmd_explain, cmd_screenshot, cmd_eval, cmd_devices,
-                            cmd_status, cmd_tabs, cmd_tabs_close)
+                            cmd_explain, cmd_login, cmd_screenshot, cmd_eval,
+                            cmd_devices, cmd_status, cmd_tabs, cmd_tabs_close)
 from passe.log_query import cmd_log_tail, cmd_log_list, cmd_log_show, cmd_log_clear
 from passe.log_lifecycle import (cmd_log_start, cmd_log_stop, cmd_log_status,
                                  cmd_log_pause, cmd_log_unpause)
@@ -73,6 +73,8 @@ Commands:
   passe check <url> --contains T  Goto + assert text present (deploy verification)
   passe capture <url> [flags] <path> Goto + wait + record network requests
   passe fetch <url> [flags] [path] Fetch and extract page content
+  passe login [url]               Open visible Chrome for a human login
+                                  (tab is kept + remembered for --reuse-tab)
   passe screenshot [flags] <out>  Screenshot current page
   passe eval <expression>         Eval JS on current page
   passe explain -c 'verbs...'     Dry-run: validate script without executing
@@ -337,6 +339,9 @@ def main():
         else:
             print(USAGE, file=sys.stderr)
             sys.exit(1)
+    elif cmd == 'login':
+        login_args = all_args[1:]
+        _run(cmd_login(login_args[0] if login_args else None))
     elif cmd == 'look' and len(all_args) >= 2:
         look_args = all_args[1:]
         url = look_args[0]
