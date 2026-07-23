@@ -196,7 +196,7 @@ def discover_chrome(cdp_url: str | None = None) -> tuple[str, dict]:
 
 
 @contextlib.asynccontextmanager
-async def connect(port=9222):
+async def connect():
     """Connect to Chrome, yield (CDPClient, info), clean up on exit.
 
     info dict contains: cdp (base URL), browser (version string), remote (bool),
@@ -216,7 +216,12 @@ async def connect(port=9222):
                                "Start Chrome with --remote-debugging-port on the remote machine"],
             )
         # Auto-launch: headless when no explicit CDP target (passe owns it),
-        # GUI when user explicitly pointed at localhost (they want Chrome Passe)
+        # GUI when user explicitly pointed at localhost (they want Chrome Passe).
+        # Launch on the port the resolved endpoint names — the readiness poll
+        # checks that endpoint, so launching anywhere else is a guaranteed
+        # 15s timeout (passe-besohe).
+        from urllib.parse import urlparse
+        port = urlparse(base_url).port or 9222
         headless = not cdp_explicit
         chrome_proc = _start_chrome(port, headless=headless)
 
