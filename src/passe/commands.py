@@ -119,6 +119,86 @@ def _emit_inline_hints(steps, inline_text):
                 break
 
 
+def _script_uses_cached_refs(steps) -> bool:
+    """True when the script acts on eN refs BEFORE any navigation.
+
+    Such a script is the act-step of a previous invocation's scout — the
+    refs cache knows which tab the refs were snapped in. A goto before the
+    first eN use makes cached refs irrelevant (navigation clears them).
+    """
+    from passe.refcache import REF_PATTERN
+    for verb, args in steps:
+        if verb in ('goto', 'back', 'forward'):
+            return False
+        if verb in ('click', 'type', 'hover', 'tap') and args \
+                and REF_PATTERN.match(args[0]):
+            return True
+    return False
+
+
+async def _resolve_reuse_tab(client, steps, goto_origin, tab_pattern,
+                             endpoint):
+    """Pick the tab --reuse-tab should attach to. Returns (target_id, url, via).
+
+    Ladder: --tab pattern > cached eN refs > last kept tab > goto-origin
+    match. NO silent fallback: the old "first non-chrome:// tab" grab landed
+    in the human's live tab on shared browsers (2026-07-21) and in
+    chrome://newtab once the kept tab had vanished (2026-07-23) — failing
+    with the open-tab list beats acting in the wrong tab.
+    """
+    from passe import refcache, tabmemory
+
+    tabs = await client.list_tabs()
+    by_id = {t['target_id']: t for t in tabs}
+    notes = []
+
+    def _listing(subset=None):
+        rows = subset if subset is not None else tabs
+        return '\n'.join(f"  {t['target_id'][:12]}  {t['url'][:70]}"
+                         for t in rows) or '  (none)'
+
+    if tab_pattern:
+        matches = [t for t in tabs
+                   if t['target_id'].startswith(tab_pattern)
+                   or tab_pattern.lower() in t['url'].lower()]
+        if len(matches) == 1:
+            t = matches[0]
+            return t['target_id'], t['url'], f'--tab {tab_pattern}'
+        kind = ('matches multiple tabs — be more specific'
+                if matches else 'matches no open tab')
+        raise RuntimeError(
+            f'--tab {tab_pattern!r} {kind}:\n{_listing(matches or None)}')
+
+    if _script_uses_cached_refs(steps):
+        tab_id = refcache.newest_refs_tab(by_id.keys())
+        if tab_id:
+            return tab_id, by_id[tab_id]['url'], 'cached eN refs'
+        notes.append('script uses eN refs but no open tab has cached refs '
+                     '(re-run ax-tree --flat-refs)')
+
+    record = tabmemory.load_last_tab(endpoint)
+    if record:
+        rec_id = record.get('target_id')
+        if rec_id in by_id:
+            return rec_id, by_id[rec_id]['url'], 'last kept tab'
+        tabmemory.clear_last_tab(endpoint)
+        notes.append('the last kept tab is gone '
+                     f"({record.get('url') or rec_id})")
+
+    if goto_origin:
+        for t in tabs:
+            if t['url'].startswith(goto_origin):
+                return t['target_id'], t['url'], f'origin {goto_origin}'
+        notes.append(f'no open tab at {goto_origin}')
+
+    why = ('; '.join(notes) + '. ') if notes else ''
+    raise RuntimeError(
+        f'reuse-tab: cannot determine which tab to resume. {why}'
+        f'Open tabs:\n{_listing()}\n'
+        f'Target one explicitly with --tab <id-or-url-substring>, '
+        f'or start fresh without --reuse-tab.')
+
+
 _FLASH_JS = """(function() {
   var t = setTimeout(function() { window.close(); }, %d);
   ['click', 'keydown', 'scroll', 'mousemove'].forEach(function(e) {
@@ -135,9 +215,13 @@ async def cmd_run(source: str, inline: str = None,
                   keep_tab: bool = False, reuse_tab: bool = False,
                   keep_on_fail: bool = True, flash: int = None,
                   foreground: bool = False, frame: str = None,
-                  device: str = None, dpr: float = None):
+                  device: str = None, dpr: float = None,
+                  tab: str = None):
     """Run a passe script from file, stdin, or inline."""
-    # --reuse-tab implies --keep-tab (don't close someone else's tab)
+    # --tab names a reuse target; --reuse-tab implies --keep-tab
+    # (don't close someone else's tab)
+    if tab:
+        reuse_tab = True
     if reuse_tab:
         keep_tab = True
     # --frame implies --keep-tab (we don't own the iframe or its parent)
@@ -179,7 +263,11 @@ async def cmd_run(source: str, inline: str = None,
         if frame:
             await client.attach_to_frame(frame)
         elif reuse_tab:
-            await client.attach_to_visible_page(origin=goto_origin)
+            target_id, tab_url, via = await _resolve_reuse_tab(
+                client, steps, goto_origin, tab, conn_info['cdp'])
+            await client.attach_to_tab(target_id)
+            print(f'[passe] reuse-tab: {tab_url} (via {via})',
+                  file=sys.stderr)
         else:
             # Auto-replace: close previous tabs at same origin before creating new one.
             # Prevents tab accumulation on repeated --keep-tab runs.
@@ -200,6 +288,7 @@ async def cmd_run(source: str, inline: str = None,
         if device:
             await do_device(client, device, dpr_override=dpr)
         script_ok = True
+        summary = None
         try:
             summary = await run_script(client, steps)
             summary['cdp'] = conn_info['cdp']
@@ -232,6 +321,16 @@ async def cmd_run(source: str, inline: str = None,
                           'auto-launched headless Chrome exits with the run',
                           file=sys.stderr)
             elif should_keep:
+                # Remember the kept tab so a later --reuse-tab resumes THIS
+                # tab, not whatever is first in Chrome's register. Skip in
+                # frame mode (_target_id would be the iframe, not a tab).
+                if not frame:
+                    from passe import tabmemory
+                    target_id = getattr(client, '_target_id', None)
+                    if isinstance(target_id, str) and target_id:
+                        tabmemory.save_last_tab(
+                            conn_info['cdp'], target_id,
+                            (summary or {}).get('final_url', ''))
                 # Flash timer is explicit-only. The old 30s keep-on-fail
                 # default never actually worked: window.close() is blocked
                 # for tabs with navigation history and no script opener

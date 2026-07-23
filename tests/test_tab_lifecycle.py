@@ -1,10 +1,12 @@
 """
-Test: Tab lifecycle — attach_to_visible_page() origin preference
-and close_tab() SSE/long-lived connection handling.
+Test: Tab lifecycle — attach_to_tab() and close_tab() SSE/long-lived
+connection handling.
 
-attach_to_visible_page() selects a tab for --reuse-tab mode.
-When origin is given, it prefers a tab whose URL matches that origin.
-Falls back to first non-chrome:// tab, then any page, then RuntimeError.
+attach_to_tab() attaches to a caller-chosen target id. Tab-selection
+POLICY lives in commands._resolve_reuse_tab (tests in
+test_reuse_targeting.py) — the old attach_to_visible_page's
+"origin match, else first tab" fallback silently grabbed unrelated tabs
+and was removed 2026-07-23 (passe-ketome).
 
 close_tab() navigates to about:blank before closing to drop SSE/WS
 connections. Both steps have 5s timeouts and catch TimeoutError,
@@ -12,9 +14,7 @@ ConnectionClosed, and CancelledError without re-raising.
 """
 
 import asyncio
-import io
 import json
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -45,94 +45,22 @@ def _attach_result(session_id: str) -> dict:
     return {'result': {'sessionId': session_id}}
 
 
-# ── attach_to_visible_page: origin preference ──────────────────────
+# ── attach_to_tab: dumb attach by caller-chosen id ──────────────────
 
 
 @pytest.mark.asyncio
-async def test_origin_match_selects_matching_tab():
-    """When origin matches a tab's URL, that tab is selected."""
+async def test_attach_to_tab_attaches_by_id():
+    """attach_to_tab attaches to exactly the given target id."""
     client = _make_client()
-    client._get_pages = AsyncMock(return_value=[
-        _page('tab-1', 'https://news.example.com/front'),
-        _page('tab-2', 'https://app.example.com/dashboard'),
-    ])
     client.send = AsyncMock(return_value=_attach_result('sess-2'))
-    await client.attach_to_visible_page(origin='https://app.example.com')
+    await client.attach_to_tab('tab-2')
 
     attach_call = client.send.call_args_list[0]
-    assert attach_call[0][1]['targetId'] == 'tab-2'
+    assert attach_call[0][0] == 'Target.attachToTarget'
+    assert attach_call[0][1] == {'targetId': 'tab-2', 'flatten': True}
     assert client.session_id == 'sess-2'
+    assert client._target_id == 'tab-2'
     assert client._owns_tab is False
-
-
-@pytest.mark.asyncio
-async def test_origin_no_match_falls_back_to_first():
-    """When origin doesn't match any tab, falls back to first non-chrome page."""
-    client = _make_client()
-    client._get_pages = AsyncMock(return_value=[
-        _page('tab-1', 'https://news.example.com/front'),
-        _page('tab-2', 'https://other.example.com/page'),
-    ])
-    client.send = AsyncMock(return_value=_attach_result('sess-1'))
-    await client.attach_to_visible_page(origin='https://nope.example.com')
-
-    attach_call = client.send.call_args_list[0]
-    assert attach_call[0][1]['targetId'] == 'tab-1'
-
-
-@pytest.mark.asyncio
-async def test_no_origin_uses_first_non_chrome_tab():
-    """Without origin, selects the first non-chrome:// page."""
-    client = _make_client()
-    client._get_pages = AsyncMock(return_value=[
-        _page('tab-chrome', 'chrome://newtab'),
-        _page('tab-real', 'https://example.com'),
-    ])
-    client.send = AsyncMock(return_value=_attach_result('sess-real'))
-    await client.attach_to_visible_page()
-
-    attach_call = client.send.call_args_list[0]
-    assert attach_call[0][1]['targetId'] == 'tab-real'
-
-
-@pytest.mark.asyncio
-async def test_only_chrome_tabs_falls_back_to_any_page():
-    """When all pages are chrome://, falls back to using them."""
-    client = _make_client()
-    client._get_pages = AsyncMock(return_value=[
-        _page('tab-1', 'chrome://newtab'),
-        _page('tab-2', 'chrome://settings'),
-    ])
-    client.send = AsyncMock(return_value=_attach_result('sess-chrome'))
-    await client.attach_to_visible_page()
-
-    attach_call = client.send.call_args_list[0]
-    assert attach_call[0][1]['targetId'] == 'tab-1'
-
-
-@pytest.mark.asyncio
-async def test_no_pages_raises_runtime_error():
-    """No page tabs at all raises RuntimeError."""
-    client = _make_client()
-    client._get_pages = AsyncMock(return_value=[])
-
-    with pytest.raises(RuntimeError, match='No browser tab to reuse'):
-        await client.attach_to_visible_page()
-
-
-@pytest.mark.asyncio
-async def test_attach_logs_tab_url_to_stderr():
-    """Attached tab's URL is logged to stderr."""
-    client = _make_client()
-    client._get_pages = AsyncMock(return_value=[
-        _page('tab-1', 'https://example.com/page'),
-    ])
-    client.send = AsyncMock(return_value=_attach_result('sess-1'))
-    captured = io.StringIO()
-    with patch('sys.stderr', captured):
-        await client.attach_to_visible_page()
-
-    assert 'reuse-tab: https://example.com/page' in captured.getvalue()
 
 
 # ── close_tab: SSE/long-lived connection handling ───────────────────

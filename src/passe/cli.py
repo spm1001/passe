@@ -99,8 +99,13 @@ Global flags:
 
 Run flags:
   --keep-tab        Keep tab open after script
-  --reuse-tab       Attach to existing visible tab (implies --keep-tab)
-  --flash [secs]    Keep tab, auto-close after idle timeout (default 30s)
+  --reuse-tab       Resume the tab passe kept for you (--tab > cached eN refs
+                    > last kept tab > goto-origin match; implies --keep-tab)
+  --tab <pat>       Attach to a specific tab by id prefix or URL substring
+                    (implies --reuse-tab)
+  --flash [secs]    Keep tab, auto-close after idle timeout (default 30s).
+                    Explicit only; note window.close() is blocked on tabs
+                    with navigation history — best-effort.
   --no-keep-on-fail Close tab even when script fails (default: keep on failure)
   --foreground      Create tab in foreground (visible to human). For jsaction sites, OAuth flows.
   --quiet           Suppress stderr hints (same as PASSE_HINTS=0)
@@ -261,8 +266,9 @@ def main():
         if '--help' in run_args or '-h' in run_args:
             print(RUN_HELP)
             sys.exit(0)
+        tab_pattern, run_args = _extract_flag(run_args, '--tab')
         keep_tab = '--keep-tab' in run_args
-        reuse_tab = '--reuse-tab' in run_args
+        reuse_tab = '--reuse-tab' in run_args or bool(tab_pattern)
         no_keep_on_fail = '--no-keep-on-fail' in run_args
         foreground = '--foreground' in run_args
         quiet = '--quiet' in run_args or '-q' in run_args
@@ -291,7 +297,7 @@ def main():
                                 keep_tab=keep_tab, reuse_tab=reuse_tab,
                                 keep_on_fail=not no_keep_on_fail,
                                 flash=flash_val, foreground=foreground,
-                                frame=frame_pattern,
+                                frame=frame_pattern, tab=tab_pattern,
                                 device=device_name, dpr=dpr_val))
         elif len(run_args) >= 1:
             arg = run_args[0]
@@ -301,7 +307,7 @@ def main():
                                     keep_tab=keep_tab, reuse_tab=reuse_tab,
                                     keep_on_fail=not no_keep_on_fail,
                                     flash=flash_val, foreground=foreground,
-                                    frame=frame_pattern,
+                                    frame=frame_pattern, tab=tab_pattern,
                                     device=device_name, dpr=dpr_val))
             else:
                 # Auto-detect inline script: join all args, check for
@@ -321,7 +327,7 @@ def main():
                                         keep_tab=keep_tab, reuse_tab=reuse_tab,
                                         keep_on_fail=not no_keep_on_fail,
                                         flash=flash_val, foreground=foreground,
-                                        frame=frame_pattern,
+                                        frame=frame_pattern, tab=tab_pattern,
                                         device=device_name, dpr=dpr_val))
                 else:
                     print(f'passe run: {arg!r} is not a file and '

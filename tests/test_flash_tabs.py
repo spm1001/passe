@@ -167,15 +167,28 @@ async def test_keep_tab_without_flash_no_timer():
 # ── --reuse-tab guard: never flash someone else's tab ─────────────
 
 
-@pytest.mark.asyncio
-async def test_reuse_tab_no_flash():
-    """--reuse-tab skips flash timer even with explicit --flash."""
+def _make_reuse_client():
+    """Client with a tab the resolution ladder can find by goto origin."""
     client = _make_client()
+    client.list_tabs = AsyncMock(return_value=[
+        {'target_id': 'T1', 'url': 'https://example.com/page', 'title': ''},
+    ])
+    client.attach_to_tab = AsyncMock()
+    return client
+
+
+@pytest.mark.asyncio
+async def test_reuse_tab_no_flash(tmp_path):
+    """--reuse-tab skips flash timer even with explicit --flash."""
+    import passe.tabmemory as tabmemory
+    client = _make_reuse_client()
     ok_summary = {'ok': True, 'steps': 1, 'total_ms': 50}
 
     with patch('passe.commands.connect', _mock_connect(client)), \
+         patch.object(tabmemory, 'LAST_TAB_PATH', tmp_path / 'lt.json'), \
          patch('passe.commands.run_script', AsyncMock(return_value=ok_summary)), \
          patch('sys.stdout', new_callable=StringIO), \
+         patch('sys.stderr', new_callable=StringIO), \
          pytest.raises(SystemExit):
         await cmd_run(None, inline='goto https://example.com',
                       reuse_tab=True, flash=30)
@@ -186,14 +199,16 @@ async def test_reuse_tab_no_flash():
 
 
 @pytest.mark.asyncio
-async def test_reuse_tab_failure_no_flash():
+async def test_reuse_tab_failure_no_flash(tmp_path):
     """--reuse-tab failure doesn't flash the tab."""
-    client = _make_client()
+    import passe.tabmemory as tabmemory
+    client = _make_reuse_client()
     failed_summary = {'ok': False, 'steps': 1, 'total_ms': 10,
                       'verb': 'click', 'error': 'not found',
                       'failed_at': 0}
 
     with patch('passe.commands.connect', _mock_connect(client)), \
+         patch.object(tabmemory, 'LAST_TAB_PATH', tmp_path / 'lt.json'), \
          patch('passe.commands.run_script', AsyncMock(return_value=failed_summary)), \
          patch('sys.stdout', new_callable=StringIO), \
          patch('sys.stderr', new_callable=StringIO), \

@@ -11,11 +11,18 @@ verbs_interaction (reader) import this without widening the DAG.
 
 import json
 import re
+import time
 from pathlib import Path
 
 REFS_DIR = None  # resolved lazily; tests patch this
 
 REF_PATTERN = re.compile(r'^e\d+$')
+
+STALE_AFTER_S = 7 * 86400  # refs outlive their tab; prune on write
+
+
+def _base_dir() -> Path:
+    return REFS_DIR or Path.home() / '.passe' / 'refs'
 
 
 def tab_id_of(client) -> str:
@@ -25,12 +32,15 @@ def tab_id_of(client) -> str:
 
 
 def _refs_file(tab_id: str) -> Path:
-    base = REFS_DIR or Path.home() / '.passe' / 'refs'
-    return base / (str(tab_id).replace('/', '_') + '.json')
+    return _base_dir() / (str(tab_id).replace('/', '_') + '.json')
 
 
 def save_refs(tab_id: str, mapping: dict) -> None:
-    """Persist {ref: backendDOMNodeId} for a tab. Best-effort."""
+    """Persist {ref: backendDOMNodeId} for a tab. Best-effort.
+
+    Also prunes refs files older than STALE_AFTER_S — tabs close but their
+    refs files used to accumulate forever (one per tab id).
+    """
     if not tab_id:
         return
     try:
@@ -38,8 +48,33 @@ def save_refs(tab_id: str, mapping: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, 'w') as f:
             json.dump(mapping, f)
+        cutoff = time.time() - STALE_AFTER_S
+        for stale in path.parent.glob('*.json'):
+            try:
+                if stale != path and stale.stat().st_mtime < cutoff:
+                    stale.unlink()
+            except OSError:
+                pass
     except Exception:
         pass
+
+
+def newest_refs_tab(live_tab_ids) -> str | None:
+    """The most recently snapped refs tab that is still open, or None.
+
+    The scout-then-act flow writes refs moments before the act step — the
+    newest refs file among live tabs is the tab the refs were snapped from.
+    """
+    live = set(live_tab_ids)
+    try:
+        candidates = sorted(_base_dir().glob('*.json'),
+                            key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    for path in candidates:
+        if path.stem in live:
+            return path.stem
+    return None
 
 
 def load_refs(tab_id: str) -> dict | None:

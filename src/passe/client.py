@@ -290,36 +290,21 @@ class CDPClient:
         self._owns_tab = False
         return self.session_id
 
-    async def attach_to_visible_page(self, origin: str = None) -> str:
-        """Attach to a non-chrome:// page tab. For --reuse-tab.
+    async def attach_to_tab(self, target_id: str) -> str:
+        """Attach to a specific tab by target id. Caller picks the tab.
 
-        If origin is given (e.g. 'http://localhost:3333'), prefer a tab
-        already on that origin. Falls back to the first non-chrome:// tab.
-        Always logs the attached tab's URL to stderr.
+        Tab-selection POLICY lives in commands._resolve_reuse_tab — this
+        method only executes the choice. The old attach_to_visible_page
+        ("origin match, else first tab") silently grabbed unrelated tabs:
+        the human's live tab on a shared browser (2026-07-21), chrome://newtab
+        once the kept tab had vanished (2026-07-23).
         """
-        all_pages = await self._get_pages()
-        pages = [t for t in all_pages
-                 if not t.get('url', '').startswith('chrome://')]
-        if not pages:
-            # Fall back to any page tab
-            pages = all_pages
-        if not pages:
-            raise RuntimeError('No browser tab to reuse — open a tab first')
-        # Prefer origin match when caller knows the target
-        target = pages[0]
-        if origin:
-            for p in pages:
-                if p.get('url', '').startswith(origin):
-                    target = p
-                    break
-        tab_url = target.get('url', 'unknown')
-        print(f'[passe] reuse-tab: {tab_url}', file=sys.stderr)
         result = await self.send('Target.attachToTarget', {
-            'targetId': target['targetId'],
+            'targetId': target_id,
             'flatten': True
         })
         self.session_id = result['result']['sessionId']
-        self._target_id = target['targetId']
+        self._target_id = target_id
         self._owns_tab = False
         return self.session_id
 
