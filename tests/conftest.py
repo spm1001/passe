@@ -26,21 +26,36 @@ def _launch_throwaway_chrome(user_data_dir: str):
     <user-data-dir>/DevToolsActivePort — race-free, unlike bind-then-release
     port guessing.
     """
+    chrome_path = _find_chrome()
     cmd = [
-        _find_chrome(),
+        chrome_path,
         '--headless=new',
         '--remote-debugging-port=0',
         f'--user-data-dir={user_data_dir}',
         '--no-first-run',
         '--no-default-browser-check',
+        # This Chrome only ever browses this machine's own test servers from
+        # a scratch profile. Without it, launch SIGABRTs on CI runners
+        # (Ubuntu 24.04 AppArmor blocks unprivileged user namespaces).
+        '--no-sandbox',
     ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    stderr_path = Path(user_data_dir) / 'chrome-stderr.log'
+    with open(stderr_path, 'wb') as stderr_f:
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=stderr_f)
+
+    def _stderr_tail():
+        try:
+            return stderr_path.read_text(errors='replace')[-800:]
+        except OSError:
+            return '<unreadable>'
+
     port_file = Path(user_data_dir) / 'DevToolsActivePort'
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             raise RuntimeError(
-                f'throwaway Chrome exited immediately (code {proc.returncode})')
+                f'throwaway Chrome ({chrome_path}) exited immediately '
+                f'(code {proc.returncode}); stderr tail:\n{_stderr_tail()}')
         try:
             port = int(port_file.read_text().splitlines()[0])
             endpoint = f'http://127.0.0.1:{port}'
@@ -51,7 +66,9 @@ def _launch_throwaway_chrome(user_data_dir: str):
             pass
         time.sleep(0.25)
     proc.kill()
-    raise RuntimeError('throwaway Chrome never became reachable within 30s')
+    raise RuntimeError(
+        f'throwaway Chrome ({chrome_path}) never became reachable within '
+        f'30s; stderr tail:\n{_stderr_tail()}')
 
 
 @pytest.fixture(scope='session')
