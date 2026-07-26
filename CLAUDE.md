@@ -81,7 +81,7 @@ Chrome Passe on the Mac binds to `localhost:9222` only (Chrome 145 ignores `--re
 
 ### Tab isolation
 
-`passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on success. **On failure, the tab is kept open** for debugging — use `passe run --reuse-tab -c "..."` to resume from the failed state. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
+`passe run` creates its own tab in the background (`background: True` in `Target.createTarget`), runs the script there, and closes it on success — with one exception: when passe *itself* just launched a visible Chrome, the tab is created in the **foreground** (a fresh window has no human context to disturb, and the human is presumably watching). **On failure, the tab is kept open** for debugging — use `passe run --reuse-tab -c "..."` to resume from the failed state. Your existing tabs are never touched and Chrome doesn't steal focus. Atomic commands (`passe screenshot`, `passe eval`) attach to the first existing tab — they observe the current page, they don't navigate.
 
 ## The DSL
 
