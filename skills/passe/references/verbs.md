@@ -7,10 +7,10 @@
 `goto <url>`, `back`, `forward`, `scroll <x> <y>`
 
 **Interaction:**
-`click <sel-or-text>`, `type <sel> <text>`, `fill <sel> <val>`, `select <sel> <val>`, `press <key>`, `hover <sel>`, `tap <sel>`, `swipe <sel> <dir> [dist]`
+`click <sel-or-text-or-ref>`, `type <sel-or-ref> <text>`, `fill <sel> <val>`, `select <sel> <val>`, `press <key>`, `hover <sel-or-ref>`, `tap <sel>`, `swipe <sel> <dir> [dist]`. Refs (`e1`, `e3`...) come from `ax-tree --flat-refs`, work across invocations (scout with `--keep-tab`, act with `--reuse-tab`), and clear on navigation.
 
 **Observation:**
-`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`, `exists <sel>`, `count <sel>`, `visible <sel>`, `pdf [path]`
+`screenshot [--fast] [--viewport] [--format F] [--quality N] [path]`, `snapshot [path]`, `eval <expr>`, `eval-to <path> <expr>`, `eval-file <js>`, `eval-file-to <out> <js>`, `ax-tree [--depth N] [--compact] [--flat-refs]`, `ax-find [--role R] [--name N]`, `ax-node <selector>`, `exists <sel>`, `count <sel>`, `visible <sel>`, `pdf [path]`
 
 **Network:**
 `capture [--bodies] [--filter] <path>`

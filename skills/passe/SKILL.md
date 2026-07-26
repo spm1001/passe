@@ -12,7 +12,8 @@ description: >
   'what does this page look like on mobile', 'fill out this form',
   'capture network requests', 'reverse-engineer API', 'check if this
   page has', 'verify deployment', 'dismiss cookie banner',
-  'monitor network traffic'. (user)
+  'monitor network traffic', 'log into this site', 'the page needs a
+  sign-in'. (user)
 ---
 
 # Passe Cookbook
@@ -38,6 +39,7 @@ Any task that needs a real browser: reading JavaScript-rendered pages, taking sc
 | Verify deployment | `passe check URL --contains TEXT` |
 | See what APIs a page calls | `passe capture URL /tmp/reqs.jsonl` |
 | Multi-step interaction | `passe run` with heredoc |
+| Human needs to sign in | `passe login site.example.com` |
 | Quick JS on current tab | `passe eval "expression"` |
 
 ## Anti-Patterns
@@ -64,9 +66,11 @@ passe fetch https://paulgraham.com/superlinear.html
 passe fetch https://react.dev/reference/react/useState /tmp/content.md
 ```
 
-**Apple Developer docs** auto-detected — fetched from structured JSON endpoint. **Next.js** sites use `__NEXT_DATA__` fast-path. Most pages try HTTP-first before touching Chrome.
+**Apple Developer docs** auto-detected — fetched from structured JSON endpoint. **Next.js** sites use `__NEXT_DATA__` fast-path. **Docs sites** are often served straight from their markdown source (`source: markdown_probe` — advertised `.md` alternates, `.md` siblings, llms.txt indexes); canonical source beats any extractor. Most pages try HTTP-first before touching Chrome.
 
-**If extraction looks thin:** check the `source` field in output. Try `--source readability` or `--source innertext` to bypass trafilatura. If a cookie banner is blocking content, dismiss it first (recipe 4).
+**The summary says how the page was fetched:** `fast_path: true` means HTTP alone served it; `fast_path: false` comes with `fast_path_reason` naming why Chrome took over (`spa_shell`, `quality=0.25`, `http_403`, `skipped: device emulation needs Chrome`...). Read it before diagnosing a slow or odd fetch.
+
+**If extraction looks thin:** check the `source` field and any `thin_read` diagnostic (word counts + probable cause: auth wall, empty page, JS hydration). A `code_block_warning` means the page's `<pre>` blocks were empty in the DOM — the code was never rendered; follow the hint to `capture --bodies` and find the source data instead of re-extracting. Try `--source readability` or `--source innertext` to bypass trafilatura. If a cookie banner is blocking content, dismiss it first (recipe 4).
 
 ### 2. Screenshot a page
 
@@ -115,6 +119,19 @@ passe run -c 'goto https://site.com; ax-find --role link --name Settings'
 passe run -c 'goto https://site.com; ax-node nav'
 ```
 
+**Scout-then-act by ref — no CSS needed:**
+```bash
+# Scout: interactive elements only, one line each, tab kept
+passe run --keep-tab -c 'goto https://site.com; ax-tree --flat-refs'
+# Shows: {"ref":"e1","role":"link","name":"Sign in"} {"ref":"e2","role":"button","name":"Search"}
+
+# Act in a later call — click/type/hover take refs directly, and the act
+# step attaches to the tab the refs were snapped in
+passe run --reuse-tab -c 'click e1; wait; extract /tmp/out.md'
+```
+
+Refs are cleared on navigation; a stale ref fails with "re-run ax-tree --flat-refs", not a CDP error. Repeated `--keep-tab` runs to the same site replace the old tab rather than accumulating strays.
+
 **Quick checks — no eval needed:**
 ```bash
 # Does an element exist?
@@ -132,7 +149,7 @@ passe run --reuse-tab -c 'pdf /tmp/page.pdf'
 
 `exists`, `count`, `visible` return their result directly in the step JSON — no eval wrappers needed. `pdf` writes via `Page.printToPDF` with backgrounds and CSS page sizes.
 
-**When to use which:** `snapshot` for CSS selectors you'll click/type into. `ax-tree` for understanding page semantics — what the page *means*, not just what's clickable. `ax-find` for targeted search (e.g. finding all buttons on a cookie banner). `exists`/`count`/`visible` for quick assertions without writing JS.
+**When to use which:** `ax-tree --flat-refs` for act-steps — cheapest scout, refs work across invocations. `snapshot` when you need CSS selectors (e.g. for `wait .selector`). `ax-tree` for understanding page semantics — what the page *means*, not just what's clickable. `ax-find` for targeted search (e.g. finding all buttons on a cookie banner). `exists`/`count`/`visible` for quick assertions without writing JS.
 
 ### 4. Dismiss a cookie banner
 
@@ -239,19 +256,19 @@ Start `watch` with `Bash run_in_background`. Read `/tmp/mobile.jpg` after each e
 
 ### 9. Handle auth pages
 
-#### Manual login flow
+#### The human-login moment
 
-When a page requires user login, navigate their visible tab and wait:
+When a site needs the human to sign in (auth wall, no API), `login` is the verb — don't reach for `--cdp` incantations or navigate their tabs:
 
 ```bash
-# Navigate the user's visible tab to the login page
-passe run --reuse-tab -c 'goto https://accounts.google.com/oauth/...'
-# Ask user: "Log in and let me know when you're done"
-# Then capture the result
-passe run --reuse-tab -c 'eval document.body.innerText'
+passe login https://app.example.com
+# Starts-or-attaches a VISIBLE Chrome at the resolved endpoint, opens the
+# page in a foreground tab, keeps browser and tab alive, records the tab.
+# Ask the human to sign in, then resume exactly where they left it:
+passe run --reuse-tab -c 'goto https://app.example.com/reports; extract /tmp/out.md'
 ```
 
-**Warning:** `--reuse-tab` navigates away from whatever the user is looking at. Only use when explicitly co-viewing.
+`--reuse-tab` resolves to the recorded login tab — it never grabs an unrelated tab (see Tab lifecycle below).
 
 #### Authenticated API shortcut
 
@@ -275,14 +292,16 @@ EOF
 ### 11. Connection troubleshooting
 
 ```bash
-# First: check connection
+# First: check connection — reports cdp_endpoint / reachable / chrome_version
 passe status
 
-# If remote Chrome unreachable, use local headless
-passe --cdp localhost:9222 look https://example.com
+# Point at a different Chrome (scheme optional — localhost:9223 works)
+passe --cdp localhost:9223 look https://example.com
 ```
 
-When Chrome is unreachable, passe emits `[passe:connection]` diagnostics with `endpoint`, `reason`, and `alternatives`. Common causes: Mac sleeping, stale Chrome process on port 9222, wrong `PASSE_CDP` value.
+When Chrome is unreachable, passe emits `[passe:connection]` diagnostics with `endpoint`, `reason`, and `alternatives`. Common causes: remote endpoint down, stale process holding the port, wrong `PASSE_CDP` value.
+
+**Auto-launch follows the address you give.** If nothing answers at a *local* endpoint, passe launches Chrome on that endpoint's port — headless when the endpoint was implicit (the default), visible when you named it explicitly or used `passe login`. Auto-launched headless Chrome dies when the run ends; the launched profile is bare (no auth cookies).
 
 ### 12. Monitor Chrome network traffic
 
@@ -313,20 +332,25 @@ passe log stop
 | Chasing "doubled output" | Claude Code bash quirk on non-zero exit. Check the error, ignore the duplication. |
 | PNG for inner-loop iteration | Use `screenshot --fast` (JPEG viewport-only, 2-4x faster). |
 | Monster inline one-liners | Use heredoc for 5+ verbs. |
+| `click e1` with no refs snapped, or after a navigation | Refs come from `ax-tree --flat-refs` and clear on navigation. Re-snap, then act. |
+| `--cdp` gymnastics to get a human signed in | `passe login <url>` is the verb — visible Chrome, foreground tab, kept + recorded. |
 
 ---
 
 ## Tab lifecycle
 
-`passe run` creates a fresh tab, runs your script, closes on success. **On failure, tab kept open** with 30s auto-close — user interaction cancels timer. Stderr shows `passe run --reuse-tab -c "..."` to resume.
+`passe run` creates a fresh tab (background on an existing browser; foreground when passe itself just launched a visible window — a fresh window has no human context to disturb), runs your script, closes on success. **On failure the tab is kept open — no auto-close timer** — and recorded, so `--reuse-tab` resumes exactly there; stderr shows the resume command. If passe auto-launched headless Chrome, nothing survives the run and the failure message says so.
 
 | Flag | Behavior |
 |------|----------|
-| (default) | Create → close on success, keep on failure |
-| `--keep-tab` | Create → leave open permanently |
-| `--flash [secs]` | Create → auto-close after timeout |
-| `--reuse-tab` | Attach to existing visible tab |
+| (default) | Create → close on success, keep + record on failure |
+| `--keep-tab` | Keep + record; a same-origin tab from a previous `--keep-tab` run is replaced, not accumulated |
+| `--reuse-tab` | Attach deterministically: `--tab` match → cached eN refs → last kept tab → goto-origin match → **fail with the open-tab list**. Never grabs an unrelated tab. Stderr names which rung won. |
+| `--tab <id-or-url-substring>` | Explicit target for `--reuse-tab` |
+| `--flash [secs]` | Best-effort auto-close timer, explicit only — Chrome blocks `window.close()` on tabs with navigation history |
 | `--no-keep-on-fail` | Force close on failure |
+
+Cleanup: `passe tabs` lists all Chrome tabs; `passe tabs close --matching PATTERN` or `--all` for bulk close.
 
 ---
 
