@@ -332,6 +332,20 @@ uv tool install ~/repos/spm1001/passe --force --reinstall --no-cache
 # bump leaves the source byte-identical, so the cached build never moves)
 ```
 
+### Doc surfaces — a feature isn't shipped until all four are swept
+
+| Surface | Reaches | Refresh path |
+|---|---|---|
+| `CLAUDE.md` | Sessions in this repo | Commit = live next session |
+| `skills/passe/SKILL.md` + `references/` | Skill-guided Claudes on plugin-installed hosts | `/batterie:publish`, then plugin update per host |
+| `instructions.md` | Every session on plugin-installed hosts — the SessionStart hook rewrites `rules/passe.md` from the **vendored** copy | **Edits do not travel until published** — `/batterie:publish` after touching it |
+| `README.md` | Humans, GitHub | Commit = live |
+
+The 2026-07-21 burst swept CLAUDE.md per-item while SKILL.md kept teaching
+retired behaviour for days (passe-kuguji), and instructions.md separately ran
+five days stale. Sweep all four at feature close; publish when the middle two
+changed.
+
 ## Architecture
 
 Modular package under `src/passe/`:
