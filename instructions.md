@@ -54,12 +54,15 @@ deliberately carries no `[Install]`/`WantedBy`; `rdp.xsession` starts it, same p
 that was live an hour ago and is gone now usually means the X session died, not a
 misconfiguration. If the whole session-scoped set is absent together, that co-absence is the tell.
 
-**A clean Chrome exit is silent** (found 2026-07-26). The unit is `Type=simple` with
-`Restart=on-failure`, so if Chrome's main process exits *successfully* — a closed window, a
-self-relaunch — the unit goes `inactive` with `Result=success`, systemd correctly declines to
-restart it, and the `OnFailure=` alert cannot fire either because nothing failed. Net effect:
-the CDP endpoint just disappears with no restart and no email. `systemctl --user start
-passe-chrome` restores it. Check `is-active` before concluding "passe is broken".
+**A clean Chrome exit self-heals since 2026-07-26 evening** (`Restart=always` + 60s/5 start
+limit, infra iw-rogopo — this paragraph previously documented the opposite: clean exits used to
+vanish silently, and did, twice that day). A closed window or tidy self-exit now relaunches in
+~3s; a *deliberate* stop is `systemctl --user stop passe-chrome`, which systemd honours. So if
+`:9223` is absent for more than a few seconds, the causes left are: the X session died (check
+the co-absence tell above), the unit was deliberately stopped (`is-active` → `inactive`), or the
+start limit tripped after a dead-display relaunch loop (`is-active` → `failed`, and a
+status-email alert has already fired — the limit self-clears after 60s, so a plain
+`systemctl --user restart passe-chrome` recovers it once the display is back).
 
 - Browser automation: `passe` (CDP CLI). Compound ops in one Bash call.
 
