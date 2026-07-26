@@ -7,24 +7,60 @@ Auto-loaded via `~/.claude/rules/passe.md`.
 | Your Default | What I Need |
 |-------------|-------------|
 | WebFetch (summaries) | `passe fetch` for web content. Never WebFetch — summaries miss nuance. |
-| `open URL` | `browse URL` for quick inspection (opens in the appliance Chrome). |
+| `open URL` | `browse URL` for quick inspection (opens in the backend Chrome — see below). |
 
-## The browser Passe drives = the kube appliance
+## The browser Passe drives — TWO backends since 2026-07-21
 
 There is **no local Chrome Passe** any more — the Mac `~/.chrome-passe` + `Chrome Passe.app`
-and the old Hezza Xvfb appliance are both retired (2026-06-27). Passe drives a real,
-logged-in Chrome on **kube**: the `passe-partout` appliance (NVIDIA GPU, home residential
-egress, persistent logins).
+and the old Hezza Xvfb appliance are both retired (2026-06-27). Passe drives one of **two**
+real, logged-in Chromes. **Which one is host-dependent, so do not assume the default.**
 
-- **`localhost:9222` IS the kube appliance, on every CC machine.** A `passe-kube-tunnel`
-  unit (systemd-user on hezza, launchd on the Mac) holds `ssh -N -L 9222:localhost:9222
-  kube`, so passe's default CDP endpoint already reaches kube. **Don't set `PASSE_CDP`** —
-  the default (`http://localhost:9222`) is correct everywhere.
-- **Authenticated / gated pages**: just `passe fetch` or `goto` — the appliance Chrome
-  already holds the logins (claude.ai, Medium, …). Profile/login state lives on kube.
-- **Connection trouble?** Run `passe status` first (reports `cdp_endpoint` / `reachable` /
-  `chrome_version`). If `localhost:9222` is unreachable, the `passe-kube-tunnel` unit is
-  probably down — check/restart it; don't say "passe is broken."
+> **Corrected 2026-07-26.** This section previously said "`localhost:9222` IS the kube
+> appliance, on every CC machine" and "**Don't set `PASSE_CDP`**". Both became wrong when tube
+> got its own browser, and the stale version survived here for five days — long enough to
+> also produce a wrong row in `~/.claude/context/traps.md` and a self-contradiction in
+> `infra/CLAUDE.md`. If you are reading a claim about which port is live, **check it** with
+> the command below rather than trusting this file.
+
+- **tube — its own session Chrome, and tube's default.** `passe-chrome.service` (user unit)
+  runs Chrome in tube's *persistent xrdp session* on **CDP `localhost:9223`**, profile
+  `~/chrome-profiles/passe`, carrying Sameer's own Google logins. `PASSE_CDP=http://localhost:9223`
+  is **tube-guarded in dotfiles `shell/bashrc`**, so a plain `passe` on tube hits this one.
+  Watchable by just RDPing in. Unit + installer: `passe-partout` `deploy/tube/`.
+- **kube — the fingerprint specialist.** The `passe-partout` appliance (NVIDIA GPU WebGL,
+  persistent site logins). Reached via the `passe-kube-tunnel` systemd-user unit
+  (`ssh -N -L 9222:localhost:9222 kube`), which runs on **tube and hezza**. From tube, ask for
+  it explicitly: `passe --cdp http://localhost:9222`. On hezza it is the default.
+- **The Mac has no passe at all** as of 2026-07-26: no launchd agent, nothing listening on
+  9222 or 9223, `passe status` → `reachable=False`, connection refused. `rules/passe.md` and
+  the passe plugin cache were removed there. So none of the above applies on a Mac — don't go
+  hunting for units that aren't installed. *(Measured by a Mac session, not from this host.)*
+- Endpoint values **require the `http://` scheme** — bare `--cdp localhost:9222` fails.
+- **Authenticated / gated pages**: just `passe fetch` or `goto` — whichever backend you reach
+  already holds the logins. Profile state lives with that backend, not here.
+
+### Connection trouble — check the unit before blaming passe
+
+Run `passe status` first (reports `cdp_endpoint` / `reachable` / `chrome_version`). Then:
+
+```bash
+systemctl --user is-active passe-chrome passe-kube-tunnel   # which backend is even up?
+ss -ltnp | grep 922                                          # what is actually listening
+```
+
+**`:9223` is session-scoped — it is up *exactly* when tube's xrdp session is up.** The unit
+deliberately carries no `[Install]`/`WantedBy`; `rdp.xsession` starts it, same pattern as
+`claude-desktop`. So `static` in `systemctl is-enabled` does **not** mean broken, and a port
+that was live an hour ago and is gone now usually means the X session died, not a
+misconfiguration. If the whole session-scoped set is absent together, that co-absence is the tell.
+
+**A clean Chrome exit is silent** (found 2026-07-26). The unit is `Type=simple` with
+`Restart=on-failure`, so if Chrome's main process exits *successfully* — a closed window, a
+self-relaunch — the unit goes `inactive` with `Result=success`, systemd correctly declines to
+restart it, and the `OnFailure=` alert cannot fire either because nothing failed. Net effect:
+the CDP endpoint just disappears with no restart and no email. `systemctl --user start
+passe-chrome` restores it. Check `is-active` before concluding "passe is broken".
+
 - Browser automation: `passe` (CDP CLI). Compound ops in one Bash call.
 
 **To change what the browser is logged into, or where it runs → the `passe-partout` repo**
