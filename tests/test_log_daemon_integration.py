@@ -1,6 +1,7 @@
 """Integration tests for log_daemon against real Chrome.
 
-Requires headless Chrome on localhost:9222. Skipped otherwise.
+Runs against the throwaway local Chrome from conftest's `local_chrome`
+fixture (skipped only when no Chrome binary exists).
 Exercises the full WebSocket send/receive cycle that unit tests cannot
 cover — the class of bugs where receiver/sender ordering matters.
 """
@@ -9,27 +10,12 @@ import asyncio
 import json
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.request import urlopen
 
 import pytest
 
 from passe.log_daemon import LogDaemon, DaemonState
 from passe.connection import connect
 from passe.verbs import do_navigate
-
-
-def _chrome_available():
-    try:
-        with urlopen('http://localhost:9222/json/version', timeout=2) as r:
-            return r.status == 200
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _chrome_available(),
-    reason='Chrome not running on localhost:9222',
-)
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +64,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def http_port(monkeypatch):
-    """Local HTTP server; clears PASSE_CDP so connect() uses localhost:9222."""
-    monkeypatch.delenv('PASSE_CDP', raising=False)
+def http_port():
+    """Local HTTP server serving the test pages."""
     srv = HTTPServer(('127.0.0.1', 0), _Handler)
     port = srv.server_address[1]
     t = threading.Thread(target=srv.serve_forever, daemon=True)
@@ -123,9 +108,9 @@ async def _read_jsonl(path, min_lines=1, timeout=10):
         await asyncio.sleep(0.2)
 
 
-def _make_daemon(tmp_path):
+def _make_daemon(tmp_path, cdp_url):
     """Create a daemon with all file paths redirected to tmp_path."""
-    d = LogDaemon(cdp_url='http://localhost:9222', log_dir=tmp_path)
+    d = LogDaemon(cdp_url=cdp_url, log_dir=tmp_path)
     d.state_file = tmp_path / 'state.json'
     d.pid_file = tmp_path / '.daemon.pid'
     d._install_signals = lambda: None  # don't interfere with pytest
@@ -152,9 +137,9 @@ async def _stop_daemon(daemon, task, timeout=5):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_connect_capture_disconnect(http_port, tmp_path):
+async def test_connect_capture_disconnect(local_chrome, http_port, tmp_path):
     """Full lifecycle: connect, capture an XHR, verify JSONL, shutdown."""
-    daemon = _make_daemon(tmp_path)
+    daemon = _make_daemon(tmp_path, local_chrome)
     task = asyncio.create_task(daemon.run())
     try:
         await _wait_state(daemon, DaemonState.CAPTURING)
@@ -195,9 +180,9 @@ async def test_connect_capture_disconnect(http_port, tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_reconnection_resumes_capture(http_port, tmp_path):
+async def test_reconnection_resumes_capture(local_chrome, http_port, tmp_path):
     """Close WebSocket to simulate disconnect, verify daemon reconnects."""
-    daemon = _make_daemon(tmp_path)
+    daemon = _make_daemon(tmp_path, local_chrome)
     task = asyncio.create_task(daemon.run())
     try:
         await _wait_state(daemon, DaemonState.CAPTURING)
@@ -232,9 +217,9 @@ async def test_reconnection_resumes_capture(http_port, tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_burst_traffic(http_port, tmp_path):
+async def test_burst_traffic(local_chrome, http_port, tmp_path):
     """Page with 120 script tags — daemon must capture without errors."""
-    daemon = _make_daemon(tmp_path)
+    daemon = _make_daemon(tmp_path, local_chrome)
     task = asyncio.create_task(daemon.run())
     try:
         await _wait_state(daemon, DaemonState.CAPTURING)
@@ -265,9 +250,9 @@ async def test_burst_traffic(http_port, tmp_path):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_concurrent_passe_tabs(http_port, tmp_path):
+async def test_concurrent_passe_tabs(local_chrome, http_port, tmp_path):
     """Daemon keeps capturing while CDPClient creates and destroys tabs."""
-    daemon = _make_daemon(tmp_path)
+    daemon = _make_daemon(tmp_path, local_chrome)
     task = asyncio.create_task(daemon.run())
     try:
         await _wait_state(daemon, DaemonState.CAPTURING)

@@ -5,30 +5,18 @@ Tests that the <10% ratio warning fires when passe reads a
 client-rendered SPA where Readability extracts a small article
 while the total page text is dominated by navigation chrome.
 
-Requires Chrome running on port 9222. Skipped otherwise.
+Runs against the throwaway local Chrome from conftest's `local_chrome`
+fixture — never whatever answers at localhost:9222, which on tube is a
+tunnel to a remote browser that can't reach this machine's test server.
+Skipped only when no Chrome binary exists.
 """
 
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.request import urlopen
 
 import pytest
 
 from passe.cli import connect, do_navigate, do_read, do_eval_file, do_eval_file_to
-
-
-def _chrome_available():
-    try:
-        with urlopen('http://localhost:9222/json/version', timeout=2) as r:
-            return r.status == 200
-    except Exception:
-        return False
-
-
-pytestmark = pytest.mark.skipif(
-    not _chrome_available(),
-    reason='Chrome not running on port 9222',
-)
 
 
 # SPA fixture: client-side rendered dashboard.
@@ -95,13 +83,8 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def spa_server(monkeypatch):
-    """Start a local HTTP server serving the SPA fixture.
-
-    Clears PASSE_CDP so tests connect to local Chrome (a remote Chrome
-    can't reach our localhost server).
-    """
-    monkeypatch.delenv('PASSE_CDP', raising=False)
+def spa_server():
+    """Start a local HTTP server serving the SPA fixture."""
     server = HTTPServer(('127.0.0.1', 0), _Handler)
     server.timeout = 1  # unblock handler threads stuck on keep-alive
     port = server.server_address[1]
@@ -112,7 +95,7 @@ def spa_server(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_spa_extraction_succeeds(spa_server):
+async def test_spa_extraction_succeeds(local_chrome, spa_server):
     """Read a client-rendered SPA — trafilatura should extract the article content."""
     async with connect() as (client, _info):
         await client.create_tab()
@@ -133,7 +116,7 @@ async def test_spa_extraction_succeeds(spa_server):
 
 
 @pytest.mark.asyncio
-async def test_eval_file_reads_and_executes(spa_server, tmp_path):
+async def test_eval_file_reads_and_executes(local_chrome, spa_server, tmp_path):
     """eval-file reads multi-line JS from a file and evaluates it."""
     js_file = tmp_path / 'test.js'
     js_file.write_text('(() => {\n  const x = 40;\n  const y = 2;\n  return x + y;\n})()')
@@ -150,7 +133,7 @@ async def test_eval_file_reads_and_executes(spa_server, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_eval_file_to_writes_result(spa_server, tmp_path):
+async def test_eval_file_to_writes_result(local_chrome, spa_server, tmp_path):
     """eval-file-to reads JS from file and writes result to output file."""
     js_file = tmp_path / 'extract.js'
     js_file.write_text('document.title')
