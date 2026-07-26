@@ -303,6 +303,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['content_type'] = read_result['content_type']
                 if read_result.get('thin_read'):
                     step_info['thin_read'] = read_result['thin_read']
+                if read_result.get('code_block_warning'):
+                    step_info['code_block_warning'] = read_result['code_block_warning']
                 if read_result.get('title'):
                     step_info['title'] = read_result['title']
             elif verb == 'fetch':
@@ -349,6 +351,8 @@ async def run_script(client: CDPClient, steps: list[tuple[str, list[str]]]) -> d
                     step_info['content_type'] = read_result['content_type']
                 if read_result.get('thin_read'):
                     step_info['thin_read'] = read_result['thin_read']
+                if read_result.get('code_block_warning'):
+                    step_info['code_block_warning'] = read_result['code_block_warning']
                 if read_result.get('title'):
                     step_info['title'] = read_result['title']
             elif verb == 'viewport':

@@ -567,6 +567,43 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
             pct = round(ratio * 100, 1)
             warning = f'Extraction looks incomplete — got {pct}% of page text ({len(markdown)}/{page_text_length} chars)'
 
+    # Empty-<pre> check (passe-ropuze): the structural gate above only sees
+    # <pre> blocks that carry text (>50 chars). When a JS component renders
+    # code as a side-effect or holds it in component state, the <pre> exists
+    # but is empty in the DOM — the extractor was honest, the source HTML
+    # never had the code. Different failure from the gate's conversion-loss,
+    # different remedy: source-data discovery, not a better extractor.
+    code_block_warning = None
+    if '<pre' in html.lower():
+        import re
+        fenced = len(re.findall(r'^```', markdown or '', re.MULTILINE)) // 2
+        if fenced == 0:
+            pre_raw = await do_eval(client, (
+                'JSON.stringify((()=>{'
+                'const pres=[...document.querySelectorAll("pre")];'
+                'const empty=pres.filter(e=>e.textContent.trim().length<10);'
+                'const custom=new Set();'
+                'for(const p of empty){let n=p.parentElement;'
+                'while(n&&n!==document.body){'
+                'if(n.tagName.includes("-")){custom.add(n.tagName.toLowerCase());break;}'
+                'n=n.parentElement;}}'
+                'return{pre:pres.length,empty:empty.length,custom:[...custom]}'
+                '})())'
+            ))
+            pre_info = json.loads(pre_raw)
+            if pre_info.get('empty', 0) > 0:
+                code_block_warning = {
+                    'pre_count': pre_info['pre'],
+                    'empty_pre_count': pre_info['empty'],
+                    'fenced_count': 0,
+                    'reason': 'pre_present_but_no_code_extracted',
+                    'hint': ('page may render code via lazy JS; try `passe capture'
+                             f' --bodies {page_url or "<url>"}` and grep response'
+                             ' URLs for source data (.md/.json) before extraction'),
+                }
+                if pre_info.get('custom'):
+                    code_block_warning['custom_elements'] = pre_info['custom']
+
     # Thin-read diagnostics (shared helper — also used by forced-source path above)
     thin_read = _check_thin_read(markdown, html, page_text_length,
                                  page_html_length, page_title, status_code)
@@ -581,6 +618,13 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
 
     if warning:
         print(f'[read] warning: {warning}', file=sys.stderr)
+    if code_block_warning:
+        inside = (' inside <' + '>, <'.join(code_block_warning['custom_elements']) + '>'
+                  if code_block_warning.get('custom_elements') else '')
+        print(f"[passe:warn] {code_block_warning['empty_pre_count']} of "
+              f"{code_block_warning['pre_count']} <pre> block(s) empty in DOM{inside}, "
+              f"no fenced code extracted — {code_block_warning['hint']}",
+              file=sys.stderr)
     print(f'[read] source: {source}', file=sys.stderr)
 
     if path:
@@ -590,6 +634,8 @@ async def do_read(client: CDPClient, path: str = None, force_source: str = None)
     result = {'markdown': markdown, 'warning': warning, 'source': source, 'title': page_title}
     if thin_read:
         result['thin_read'] = thin_read
+    if code_block_warning:
+        result['code_block_warning'] = code_block_warning
     return result
 
 

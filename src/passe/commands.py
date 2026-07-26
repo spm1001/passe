@@ -496,6 +496,9 @@ async def cmd_fetch(url: str, path: str = None,
                     file_entry['content_type'] = result['content_type']
                 summary['files'] = [file_entry]
 
+            if result.get('code_block_warning'):
+                summary['code_block_warning'] = result['code_block_warning']
+
             # Exit code 1 for thin/degraded extraction
             # Only flag thin_read from the extraction cascade — don't second-guess
             # based on word count alone (short pages are legitimate)
