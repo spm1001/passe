@@ -58,11 +58,26 @@ misconfiguration. If the whole session-scoped set is absent together, that co-ab
 limit, infra iw-rogopo — this paragraph previously documented the opposite: clean exits used to
 vanish silently, and did, twice that day). A closed window or tidy self-exit now relaunches in
 ~3s; a *deliberate* stop is `systemctl --user stop passe-chrome`, which systemd honours. So if
-`:9223` is absent for more than a few seconds, the causes left are: the X session died (check
-the co-absence tell above), the unit was deliberately stopped (`is-active` → `inactive`), or the
-start limit tripped after a dead-display relaunch loop (`is-active` → `failed`, and a
-status-email alert has already fired — the limit self-clears after 60s, so a plain
-`systemctl --user restart passe-chrome` recovers it once the display is back).
+`:9223` is absent for more than a few seconds, the causes left are: the X session died, the unit
+was deliberately stopped, or — before 2026-08-04 — a dead-display relaunch loop tripped the
+start limit.
+
+**Since 2026-08-04 a dead display leaves the unit `inactive`, not `failed`** (infra
+`50-require-display.conf`: an `ExecCondition=` tests the X socket for `$DISPLAY`, and a failed
+*condition* skips the unit instead of failing it). Two consequences for diagnosis:
+
+- **`inactive` is now ambiguous** — deliberately stopped and no-display-so-skipped look identical
+  in `is-active`. The discriminator is the journal:
+  `journalctl --user -u passe-chrome | grep "exec-condition"` → *"Skipped due to 'exec-condition'"*
+  means there was no display. Don't read `inactive` as "someone stopped it".
+- **`failed` after a dead display should no longer happen at all.** If you see it, the condition
+  is not doing its job — check the drop-in is present (`systemctl --user cat passe-chrome`).
+
+Why it changed: the start limit stopped the runaway loop but **not** the alert storm, because
+`OnFailure=` fires on *every* failed start attempt. On 2026-08-04 an 8-hour xrdp disconnect reap
+produced 13 emails in 35 seconds (6 passe-chrome, 7 claude-desktop). This paragraph used to say
+the limit meant it "fails once audibly, and stops" — measured, it failed six times audibly. One
+email per unit per episode still fires, which is what "once audibly" always claimed.
 
 - Browser automation: `passe` (CDP CLI). Compound ops in one Bash call.
 
