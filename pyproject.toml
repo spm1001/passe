@@ -4,7 +4,7 @@ dynamic = ["version"]
 description = "Fast CDP browser automation — the kitchen pass for Chrome"
 requires-python = ">=3.11"
 dependencies = [
-    "websockets>=12.0",
+    "websockets>=17.0.1",
     "trafilatura>=2.0",
     "httpx>=0.28.0",
 ]
