@@ -29,8 +29,8 @@ real, logged-in Chromes. **Which one is host-dependent, so do not assume the def
   Watchable by just RDPing in. Unit + installer: `passe-partout` `deploy/tube/`.
 - **kube — the fingerprint specialist.** The `passe-partout` appliance (NVIDIA GPU WebGL,
   persistent site logins). Reached via the `passe-kube-tunnel` systemd-user unit
-  (`ssh -N -L 9222:localhost:9222 kube`), which runs on **tube and hezza**. From tube, ask for
-  it explicitly: `passe --cdp http://localhost:9222`. On hezza it is the default.
+  (`ssh -N -L 9222:localhost:9222 kube`), which runs on **tube** — the only tunnel host since
+  hezza's 2026-08-02 teardown. Ask for it explicitly: `passe --cdp http://localhost:9222`.
 - **The Mac has no passe at all** as of 2026-07-26: no launchd agent, nothing listening on
   9222 or 9223, `passe status` → `reachable=False`, connection refused. `rules/passe.md` and
   the passe plugin cache were removed there. So none of the above applies on a Mac — don't go
@@ -84,4 +84,4 @@ email per unit per episode still fires, which is what "once audibly" always clai
 **To change what the browser is logged into, or where it runs → the `passe-partout` repo**
 (the appliance is config there — systemd units + a logged-in profile + the tunnel — not
 code here). A fresh CC machine needs the `passe-kube-tunnel` installed; see `passe-partout`
-`deploy/` (`deploy/hezza/install.sh` for hezza; the launchd agent pattern for a Mac).
+`deploy/` (`deploy/client/install.sh` for a Linux box; the launchd agent pattern for a Mac).
