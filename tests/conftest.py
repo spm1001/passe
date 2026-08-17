@@ -19,6 +19,16 @@ import pytest
 from passe.connection import _find_chrome
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_invocation_log(tmp_path_factory, monkeypatch):
+    """Point XDG_DATA_HOME at a temp dir so tests that call cli.main() never
+    write test noise into the real ~/.local/share/passe/invocations.jsonl
+    (the _invlog shim's output is analysis data — test invocations would
+    poison the caller-stamp baseline). Tests that probe the log override
+    XDG_DATA_HOME themselves."""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg")))
+
+
 def _launch_throwaway_chrome(user_data_dir: str):
     """Launch headless Chrome on an OS-assigned port; return (proc, endpoint).
 

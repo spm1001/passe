@@ -15,6 +15,7 @@ import asyncio
 import os
 import sys
 
+from passe import _invlog
 from passe.connection import set_cdp_override, ChromeConnectionError
 from passe.commands import (cmd_run, cmd_fetch, cmd_look, cmd_check, cmd_capture,
                             cmd_explain, cmd_login, cmd_screenshot, cmd_eval,
@@ -234,6 +235,23 @@ def _run(coro):
 
 
 def main():
+    """Entry point: invocation logging around the real dispatcher.
+
+    Every invocation — success and failure alike — appends one caller-stamped
+    JSONL line via the vendored shim (src/passe/_invlog.py; canonical copy and
+    conformance test live in spm1001/harness-ergonomics). Logging is
+    best-effort: a broken log path never breaks the CLI (erg-cilasa).
+    """
+    try:
+        from importlib.metadata import version as _pkg_version
+        v = _pkg_version("passe")
+    except Exception:
+        v = "0.0.0"
+    with _invlog.capture("passe", v) as inv:
+        _main(inv)
+
+
+def _main(inv):
     if len(sys.argv) < 2:
         print(USAGE, file=sys.stderr)
         sys.exit(1)
@@ -254,6 +272,12 @@ def main():
         print(USAGE, file=sys.stderr)
         sys.exit(1)
     cmd = all_args[0]
+    # Post-parse view for the invocation log: the hand-rolled equivalent of an
+    # argparse namespace (global flags extracted, remainder as `rest`).
+    inv.note(subcommand=cmd, parsed={
+        "cdp": cdp_url, "device": device_name, "dpr": dpr_val,
+        "frame": frame_pattern, "rest": all_args[1:],
+    })
 
     if cmd in ('--help', '-h'):
         print(USAGE)
